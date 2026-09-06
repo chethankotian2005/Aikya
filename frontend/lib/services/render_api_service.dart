@@ -9,8 +9,7 @@ final renderApiServiceProvider = Provider<RenderApiService>((ref) {
 });
 
 class RenderApiService {
-  // TODO: Replace with your actual Render backend URL
-  static const String baseUrl = 'https://aikya-backend.onrender.com/api';
+  static const String baseUrl = 'https://aikya-backend-2t80.onrender.com/api';
 
   Future<Map<String, String>> _getHeaders() async {
     final user = FirebaseAuth.instance.currentUser;
