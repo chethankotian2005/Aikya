@@ -1,0 +1,273 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ═══════════════════════════════════════════════════════════════════
+    // HELPER FUNCTIONS
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// Get the requesting user's role from their own users/{uid} doc.
+    /// NEVER trust a role claimed by the client.
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isHod() {
+      return isSignedIn() && getUserRole() == 'hod';
+    }
+
+    function isEventFaculty() {
+      return isSignedIn() && getUserRole() == 'event_faculty';
+    }
+
+    function isAssistant() {
+      return isSignedIn() && getUserRole() == 'assistant';
+    }
+
+    function isStudent() {
+      return isSignedIn() && getUserRole() == 'student';
+    }
+
+    /// Can create/edit events: hod or event_faculty
+    function canManageEvents() {
+      let role = getUserRole();
+      return isSignedIn() && (role == 'hod' || role == 'event_faculty');
+    }
+
+    /// Can approve/reject attendance requests: hod or assistant
+    function canReviewAttendance() {
+      let role = getUserRole();
+      return isSignedIn() && (role == 'hod' || role == 'assistant');
+    }
+
+    /// Can moderate content (memory wall): hod or assistant
+    function canModerateContent() {
+      let role = getUserRole();
+      return isSignedIn() && (role == 'hod' || role == 'assistant');
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // USERS
+    // ═══════════════════════════════════════════════════════════════════
+
+    match /users/{uid} {
+      // Anyone signed in can read user profiles (needed for display names, etc.)
+      allow read: if isSignedIn();
+
+      // Users can only create their own document.
+      // USN must match the college pattern: 4MW followed by 2 digits, AI,
+      // then 3 digits. E.g. 4MW21AI042
+      allow create: if isOwner(uid)
+        && request.resource.data.keys().hasAll(['email', 'usn', 'fullName', 'role'])
+        && request.resource.data.usn.matches('^4MW[0-9]{2}AI[0-9]{3}$')
+        && request.resource.data.role in ['hod', 'event_faculty', 'regular_faculty', 'assistant', 'student'];
+
+      // Users can update their own profile, but cannot change role or email.
+      // USN can be updated (e.g. during profile setup) but must match the AI branch regex.
+      // Only HOD can change another user's role.
+      allow update: if isOwner(uid)
+        && request.resource.data.role == resource.data.role  // Cannot self-promote
+        && request.resource.data.email == resource.data.email // Email is immutable
+        && request.resource.data.usn.matches('^4MW[0-9]{2}AI[0-9]{3}$') // Server-side USN validation
+        || isHod(); // HOD can update any user (including role changes)
+
+      allow delete: if isHod();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // EVENTS
+    // ═══════════════════════════════════════════════════════════════════
+
+    match /events/{eventId} {
+      // All authenticated users can read events.
+      allow read: if isSignedIn();
+
+      // Only hod and event_faculty can create events.
+      allow create: if canManageEvents()
+        && request.resource.data.keys().hasAll([
+             'title', 'description', 'venue', 'eventDate',
+             'maxCapacity', 'currentRegistrations', 'registrationDeadline',
+             'createdBy'
+           ])
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.currentRegistrations == 0;
+
+      // hod and event_faculty can update events.
+      // Also allow the transaction to increment currentRegistrations
+      // (the transaction runs as the student's auth context, so we need
+      // to allow students to update ONLY the counter field).
+      allow update: if canManageEvents()
+        || (isSignedIn()
+            // Student can only update currentRegistrations (via transaction)
+            && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['currentRegistrations']));
+
+      allow delete: if isHod();
+
+      // ─── REGISTRATIONS SUBCOLLECTION ─────────────────────────────
+
+      match /registrations/{studentUid} {
+        // All authenticated users can read registrations.
+        // Faculty/hod need this for attendance lists.
+        allow read: if isSignedIn();
+
+        // Students can only create their own registration doc.
+        // The doc ID must match their auth UID.
+        allow create: if isOwner(studentUid)
+          && request.resource.data.keys().hasAll(['formResponses', 'registeredAt']);
+
+        // Students can delete their own registration (cancel).
+        allow delete: if isOwner(studentUid) || canManageEvents();
+
+        // No direct updates — registration is immutable once created.
+        allow update: if false;
+      }
+
+      // ─── COMMENTS SUBCOLLECTION ──────────────────────────────────
+
+      match /comments/{commentId} {
+        // All authenticated users can read comments.
+        allow read: if isSignedIn();
+
+        // Any authenticated user can create a comment,
+        // but userId must match their auth UID.
+        allow create: if isSignedIn()
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.keys().hasAll(['userId', 'commentText', 'createdAt'])
+          // Clients cannot set sentiment fields — server only.
+          && !request.resource.data.keys().hasAny(['sentimentLabel', 'sentimentScore']);
+
+        // Only hod/event_faculty can delete comments (moderation).
+        // Also allow the comment author to delete their own.
+        allow delete: if canManageEvents()
+          || (isSignedIn() && resource.data.userId == request.auth.uid);
+
+        // Only allow server (admin SDK bypasses rules) to update
+        // sentiment fields. Block all client updates.
+        allow update: if false;
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // ATTENDANCE REQUESTS
+    // ═══════════════════════════════════════════════════════════════════
+
+    match /attendanceRequests/{requestId} {
+      // All authenticated users can read attendance requests.
+      // Students need to see their own request status.
+      allow read: if isSignedIn();
+
+      // Students can create attendance requests for themselves only.
+      allow create: if isSignedIn()
+        && request.resource.data.studentId == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.keys().hasAll([
+             'studentId', 'eventId', 'requestDetails', 'status'
+           ]);
+
+      // Only hod and assistant can update status (approve/reject).
+      // They must set reviewedBy to their own UID.
+      // Status can only transition from 'pending' to 'approved' or 'rejected'.
+      allow update: if canReviewAttendance()
+        && resource.data.status == 'pending'
+        && request.resource.data.status in ['approved', 'rejected']
+        && request.resource.data.reviewedBy == request.auth.uid
+        // Immutable fields cannot change.
+        && request.resource.data.studentId == resource.data.studentId
+        && request.resource.data.eventId == resource.data.eventId
+        && request.resource.data.requestDetails == resource.data.requestDetails;
+
+      allow delete: if isHod();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // ALUMNI PROFILES
+    // ═══════════════════════════════════════════════════════════════════
+
+    match /alumniProfiles/{uid} {
+      // All authenticated users can read alumni profiles.
+      allow read: if isSignedIn();
+
+      // Alumni can create their own profile.
+      allow create: if isOwner(uid)
+        && request.resource.data.verifiedByHod == false;
+
+      // Alumni can update their own profile (except verifiedByHod).
+      // HOD can update any profile (including verification).
+      allow update: if (isOwner(uid)
+            && request.resource.data.verifiedByHod == resource.data.verifiedByHod)
+        || isHod();
+
+      allow delete: if isHod();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // MEMORY FRAMES (Photo Wall)
+    // ═══════════════════════════════════════════════════════════════════
+
+    match /memoryFrames/{frameId} {
+      // Anyone signed in can read approved frames.
+      // Uploaders can read their own pending frames.
+      // Moderators (hod/assistant) can read all frames.
+      allow read: if isSignedIn()
+        && (resource.data.status == 'approved'
+            || resource.data.uploadedBy == request.auth.uid
+            || canModerateContent());
+
+      // Any authenticated user can upload (status must be 'pending').
+      allow create: if isSignedIn()
+        && request.resource.data.uploadedBy == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.likesCount == 0;
+
+      // Moderation updates (approve/reject) — hod and assistant only.
+      // Like increments are allowed for any signed-in user (only likesCount changes).
+      allow update: if canModerateContent()
+        || (isSignedIn()
+            && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['likesCount']));
+
+      // Only hod can delete.
+      allow delete: if isHod();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // ACCREDITATION REPORTS
+    // ═══════════════════════════════════════════════════════════════════
+
+    match /accreditationReports/{reportId} {
+      // All authenticated users can read reports.
+      allow read: if isSignedIn();
+
+      // Only HOD can create, update, and delete reports.
+      allow create: if isHod()
+        && request.resource.data.compiledBy == request.auth.uid;
+
+      allow update: if isHod();
+
+      allow delete: if isHod();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // ACADEMIC BATCH CONFIG
+    // ═══════════════════════════════════════════════════════════════════
+
+    match /academicBatchConfig/{configId} {
+      // All authenticated users can read batch configs (needed for USN lookup).
+      allow read: if isSignedIn();
+
+      // TEMPORARY: Allow any authenticated user to write (for initial seeding).
+      // TODO: Change to isHod() after seeding is complete.
+      allow create, update, delete: if isSignedIn();
+    }
+  }
+}

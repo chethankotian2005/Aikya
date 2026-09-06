@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "287187127448",
+    "project_id": "aikya-platform",
+    "storage_bucket": "aikya-platform.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:287187127448:android:3d8821abe8b3a696c514ed",
+        "android_client_info": {
+          "package_name": "com.smvitm.aiml_hub"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB63cXtjmlnbhUMDVI_izN9vExtjcFa31w"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

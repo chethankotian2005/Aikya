@@ -1,0 +1,30 @@
+# Render deployment blueprint
+# https://docs.render.com/blueprint-spec
+
+services:
+  - type: web
+    name: aikya-backend
+    runtime: node
+    region: singapore  # closest to India
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: FIREBASE_SERVICE_ACCOUNT
+        sync: false  # set manually in Render dashboard (secret)
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_STORAGE_BUCKET
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: RATE_LIMIT_WINDOW_MS
+        value: "60000"
+      - key: RATE_LIMIT_MAX_REQUESTS
+        value: "10"
+    healthCheckPath: /health
+    autoDeploy: true
