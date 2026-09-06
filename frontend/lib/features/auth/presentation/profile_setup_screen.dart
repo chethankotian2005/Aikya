@@ -12,6 +12,7 @@ import 'package:http/http.dart' as http;
 import '../../../services/firebase_service.dart';
 import '../../../utils/usn_parser.dart';
 import '../../../utils/academic_batch_seeder.dart';
+import '../data/user_doc.dart';
 
 class ProfileSetupScreen extends ConsumerStatefulWidget {
   const ProfileSetupScreen({super.key});
