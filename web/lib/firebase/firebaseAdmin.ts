@@ -3,7 +3,7 @@ import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 
-let credential;
+let credential: any;
 try {
   const serviceAccountStr = process.env.FIREBASE_SERVICE_ACCOUNT;
   if (serviceAccountStr) {
@@ -28,7 +28,7 @@ try {
 }
 
 // Don't crash on import if credential is not valid
-let app;
+let app: any;
 try {
   if (getApps().length === 0) {
     app = initializeApp({
