@@ -12,13 +12,15 @@ class LoginView extends ConsumerStatefulWidget {
 }
 
 class _LoginViewState extends ConsumerState<LoginView> {
-  final _usnController = TextEditingController();
+  final _idController = TextEditingController(); // used for both USN and Faculty ID
   final _passwordController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
 
+  String _loginType = 'Student'; // 'Student' or 'Faculty'
+
   @override
   void dispose() {
-    _usnController.dispose();
+    _idController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
@@ -26,13 +28,17 @@ class _LoginViewState extends ConsumerState<LoginView> {
   void _login() async {
     if (!_formKey.currentState!.validate()) return;
 
-    await ref.read(authControllerProvider.notifier).loginWithUsn(
-          _usnController.text.trim(),
-          _passwordController.text,
-        );
-
-    // After auth Controller handles the state, GoRouter will automatically
-    // redirect to '/home' because authState changes, as defined in app_router.dart.
+    if (_loginType == 'Student') {
+      await ref.read(authControllerProvider.notifier).loginWithUsn(
+            _idController.text.trim(),
+            _passwordController.text,
+          );
+    } else {
+      await ref.read(authControllerProvider.notifier).loginWithFacultyId(
+            _idController.text.trim(),
+            _passwordController.text,
+          );
+    }
   }
 
   @override
@@ -82,23 +88,52 @@ class _LoginViewState extends ConsumerState<LoginView> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Login with your USN to continue',
+                    _loginType == 'Student' 
+                      ? 'Login with your USN to continue'
+                      : 'Login with your Faculty ID to continue',
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: theme.colorScheme.onBackground.withOpacity(0.7),
                     ),
                     textAlign: TextAlign.center,
                   ),
-                  const SizedBox(height: 48),
+                  const SizedBox(height: 24),
+                  
+                  SegmentedButton<String>(
+                    segments: const [
+                      ButtonSegment<String>(
+                        value: 'Student',
+                        label: Text('Student'),
+                      ),
+                      ButtonSegment<String>(
+                        value: 'Faculty',
+                        label: Text('Faculty'),
+                      ),
+                    ],
+                    selected: {_loginType},
+                    onSelectionChanged: (Set<String> newSelection) {
+                      setState(() {
+                        _loginType = newSelection.first;
+                        _idController.clear();
+                        _passwordController.clear();
+                      });
+                    },
+                  ),
+
+                  const SizedBox(height: 32),
                   TextFormField(
-                    controller: _usnController,
-                    decoration: const InputDecoration(
-                      labelText: 'USN',
-                      hintText: 'e.g. 4MW20CS001',
-                      prefixIcon: Icon(Icons.badge),
+                    controller: _idController,
+                    decoration: InputDecoration(
+                      labelText: _loginType == 'Student' ? 'USN' : 'Faculty ID',
+                      hintText: _loginType == 'Student' ? 'e.g. 4MW20CS001' : 'e.g. 0544',
+                      prefixIcon: const Icon(Icons.badge),
                     ),
                     textInputAction: TextInputAction.next,
-                    validator: (value) =>
-                        value == null || value.isEmpty ? 'USN is required' : null,
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return _loginType == 'Student' ? 'USN is required' : 'Faculty ID is required';
+                      }
+                      return null;
+                    },
                   ),
                   const SizedBox(height: 16),
                   TextFormField(
@@ -128,26 +163,28 @@ class _LoginViewState extends ConsumerState<LoginView> {
                         : const Text('Login'),
                   ),
                   const SizedBox(height: 24),
-                  TextButton(
-                    onPressed: authState.isLoading ? null : () => context.push('/signup'),
-                    child: RichText(
-                      text: TextSpan(
-                        text: 'New User? ',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onBackground.withOpacity(0.7),
-                        ),
-                        children: [
-                          TextSpan(
-                            text: 'Sign Up',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: theme.colorScheme.primary,
-                              fontWeight: FontWeight.bold,
-                            ),
+                  
+                  if (_loginType == 'Student')
+                    TextButton(
+                      onPressed: authState.isLoading ? null : () => context.push('/signup'),
+                      child: RichText(
+                        text: TextSpan(
+                          text: 'New User? ',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.onBackground.withOpacity(0.7),
                           ),
-                        ],
+                          children: [
+                            TextSpan(
+                              text: 'Sign Up',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: theme.colorScheme.primary,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
                 ],
               ),
             ),

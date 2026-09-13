@@ -10,7 +10,7 @@ _CommentDoc _$CommentDocFromJson(Map<String, dynamic> json) => _CommentDoc(
   id: json['id'] as String,
   userId: json['userId'] as String,
   commentText: json['commentText'] as String,
-  createdAt: const DateTimeConverter().fromJson(json['createdAt']),
+  createdAt: DateTime.parse(json['createdAt'] as String),
   sentimentLabel: json['sentimentLabel'] as String?,
   sentimentScore: (json['sentimentScore'] as num?)?.toDouble(),
 );
@@ -20,7 +20,7 @@ Map<String, dynamic> _$CommentDocToJson(_CommentDoc instance) =>
       'id': instance.id,
       'userId': instance.userId,
       'commentText': instance.commentText,
-      'createdAt': const DateTimeConverter().toJson(instance.createdAt),
+      'createdAt': instance.createdAt.toIso8601String(),
       'sentimentLabel': instance.sentimentLabel,
       'sentimentScore': instance.sentimentScore,
     };

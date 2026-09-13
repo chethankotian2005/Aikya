@@ -15,7 +15,7 @@ _AlumniDoc _$AlumniDocFromJson(Map<String, dynamic> json) => _AlumniDoc(
   linkedinUrl: json['linkedinUrl'] as String,
   isOpenForMentorship: json['isOpenForMentorship'] as bool? ?? false,
   verifiedByHod: json['verifiedByHod'] as bool? ?? false,
-  createdAt: const DateTimeConverter().fromJson(json['createdAt']),
+  createdAt: DateTime.parse(json['createdAt'] as String),
 );
 
 Map<String, dynamic> _$AlumniDocToJson(_AlumniDoc instance) =>
@@ -28,5 +28,5 @@ Map<String, dynamic> _$AlumniDocToJson(_AlumniDoc instance) =>
       'linkedinUrl': instance.linkedinUrl,
       'isOpenForMentorship': instance.isOpenForMentorship,
       'verifiedByHod': instance.verifiedByHod,
-      'createdAt': const DateTimeConverter().toJson(instance.createdAt),
+      'createdAt': instance.createdAt.toIso8601String(),
     };

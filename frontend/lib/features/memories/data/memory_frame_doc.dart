@@ -20,10 +20,12 @@ abstract class MemoryFrameDoc with _$MemoryFrameDoc {
     required String imageUrl,
     required String caption,
     required String eventName,
+    String? eventId,
     required String batchYear,
     @Default(FrameStatus.pending) FrameStatus status,
     String? approvedBy,
     @Default(0) int likesCount,
+    String? reportMarkdown,
     @DateTimeConverter() required DateTime createdAt,
   }) = _MemoryFrameDoc;
 

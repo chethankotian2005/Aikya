@@ -47,6 +47,19 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
   
   bool _flagForHodReview = false;
 
+  // Privacy Settings
+  bool _publicBio = true;
+  bool _publicGithub = true;
+  bool _publicLinkedin = true;
+  bool _publicPersonalWebsite = true;
+  bool _publicInstagram = true;
+  bool _publicTwitter = true;
+
+  // Notification Settings
+  bool _eventsEnabled = true;
+  bool _updatesEnabled = true;
+  bool _memoriesEnabled = true;
+
   @override
   void initState() {
     super.initState();
@@ -74,6 +87,17 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
         if (userDoc.personalWebsite != null) _websiteController.text = userDoc.personalWebsite!;
         if (userDoc.twitterHandle != null) _twitterController.text = userDoc.twitterHandle!;
         if (userDoc.discordHandle != null) _discordController.text = userDoc.discordHandle!;
+
+        _publicBio = userDoc.privacySettings.publicBio;
+        _publicGithub = userDoc.privacySettings.publicGithub;
+        _publicLinkedin = userDoc.privacySettings.publicLinkedin;
+        _publicPersonalWebsite = userDoc.privacySettings.publicPersonalWebsite;
+        _publicInstagram = userDoc.privacySettings.publicInstagram;
+        _publicTwitter = userDoc.privacySettings.publicTwitter;
+
+        _eventsEnabled = userDoc.notificationSettings.eventsEnabled;
+        _updatesEnabled = userDoc.notificationSettings.updatesEnabled;
+        _memoriesEnabled = userDoc.notificationSettings.memoriesEnabled;
       });
     }
   }
@@ -218,6 +242,19 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
           'discordHandle': _discordController.text.trim().isEmpty ? null : _discordController.text.trim(),
           'profilePictureUrl': photoUrl,
           'flagForHodReview': _flagForHodReview,
+          'privacySettings': {
+            'publicBio': _publicBio,
+            'publicGithub': _publicGithub,
+            'publicLinkedin': _publicLinkedin,
+            'publicPersonalWebsite': _publicPersonalWebsite,
+            'publicInstagram': _publicInstagram,
+            'publicTwitter': _publicTwitter,
+          },
+          'notificationSettings': {
+            'eventsEnabled': _eventsEnabled,
+            'updatesEnabled': _updatesEnabled,
+            'memoriesEnabled': _memoriesEnabled,
+          },
         }),
       );
 
@@ -311,6 +348,14 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
                             _buildSectionHeader('Social Links', Icons.link_rounded),
                             const SizedBox(height: 12),
                             _buildSocialLinksCard(),
+                            const SizedBox(height: 24),
+                            _buildSectionHeader('Privacy Settings', Icons.security_rounded),
+                            const SizedBox(height: 12),
+                            _buildPrivacySettingsCard(),
+                            const SizedBox(height: 24),
+                            _buildSectionHeader('Notification Settings', Icons.notifications_rounded),
+                            const SizedBox(height: 12),
+                            _buildNotificationSettingsCard(),
                             const SizedBox(height: 32),
                             _buildSaveButton(),
                             const SizedBox(height: 32),
@@ -633,6 +678,116 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
           _socialField(_websiteController, 'Personal Website', Icons.language_rounded),
         ],
       ),
+    );
+  }
+
+  // ─── Privacy Settings Card ──────────────────────────────────────────
+  Widget _buildPrivacySettingsCard() {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surfaceElevated,
+        borderRadius: AppRadius.borderRadiusLg,
+        border: Border.all(color: AppColors.border),
+        boxShadow: AppShadows.sm,
+      ),
+      child: Column(
+        children: [
+          _privacyToggle(
+            'Public Bio',
+            'Allow other students to see your bio',
+            _publicBio,
+            (val) => setState(() => _publicBio = val),
+          ),
+          const Divider(height: 1, color: AppColors.border),
+          _privacyToggle(
+            'Public GitHub',
+            'Show GitHub link on your profile',
+            _publicGithub,
+            (val) => setState(() => _publicGithub = val),
+          ),
+          const Divider(height: 1, color: AppColors.border),
+          _privacyToggle(
+            'Public LinkedIn',
+            'Show LinkedIn link on your profile',
+            _publicLinkedin,
+            (val) => setState(() => _publicLinkedin = val),
+          ),
+          const Divider(height: 1, color: AppColors.border),
+          _privacyToggle(
+            'Public Instagram',
+            'Show Instagram link on your profile',
+            _publicInstagram,
+            (val) => setState(() => _publicInstagram = val),
+          ),
+          const Divider(height: 1, color: AppColors.border),
+          _privacyToggle(
+            'Public Twitter/X',
+            'Show Twitter link on your profile',
+            _publicTwitter,
+            (val) => setState(() => _publicTwitter = val),
+          ),
+          const Divider(height: 1, color: AppColors.border),
+          _privacyToggle(
+            'Public Website',
+            'Show Personal Website on your profile',
+            _publicPersonalWebsite,
+            (val) => setState(() => _publicPersonalWebsite = val),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── Notification Settings Card ──────────────────────────────────────
+  Widget _buildNotificationSettingsCard() {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surfaceElevated,
+        borderRadius: AppRadius.borderRadiusLg,
+        border: Border.all(color: AppColors.border),
+        boxShadow: AppShadows.sm,
+      ),
+      child: Column(
+        children: [
+          _privacyToggle(
+            'Event Notifications',
+            'Get notified about new events',
+            _eventsEnabled,
+            (val) => setState(() => _eventsEnabled = val),
+          ),
+          const Divider(height: 1, color: AppColors.border),
+          _privacyToggle(
+            'Updates Notifications',
+            'Get notified about new faculty updates',
+            _updatesEnabled,
+            (val) => setState(() => _updatesEnabled = val),
+          ),
+          const Divider(height: 1, color: AppColors.border),
+          _privacyToggle(
+            'Memory Notifications',
+            'Get notified when your memory is approved',
+            _memoriesEnabled,
+            (val) => setState(() => _memoriesEnabled = val),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _privacyToggle(String title, String subtitle, bool value, ValueChanged<bool> onChanged) {
+    return SwitchListTile(
+      title: Text(
+        title,
+        style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textTertiary),
+      ),
+      value: value,
+      onChanged: onChanged,
+      activeColor: AppColors.accent,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
     );
   }
 

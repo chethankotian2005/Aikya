@@ -1,20 +1,24 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/theme/app_tokens.dart';
 import '../models/event_model.dart';
+import 'package:go_router/go_router.dart';
+import '../services/firebase_service.dart';
+import '../features/auth/data/user_doc.dart';
 
 /// Event Detail — banner, countdown, expandable description, dynamic
 /// registration form, and sticky "Register" bottom bar with live seat count.
-class EventDetailScreen extends StatefulWidget {
+class EventDetailScreen extends ConsumerStatefulWidget {
   final EventModel event;
   const EventDetailScreen({super.key, required this.event});
 
   @override
-  State<EventDetailScreen> createState() => _EventDetailScreenState();
+  ConsumerState<EventDetailScreen> createState() => _EventDetailScreenState();
 }
 
-class _EventDetailScreenState extends State<EventDetailScreen> {
+class _EventDetailScreenState extends ConsumerState<EventDetailScreen> {
   bool _descExpanded = false;
   bool _isRegistered = false;
   bool _isSubmitting = false;
@@ -68,6 +72,9 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final currentUser = ref.watch(currentUserDocProvider).value;
+    final isFacultyView = currentUser != null && currentUser.role != UserRole.student;
+
     return Scaffold(
       backgroundColor: AppColors.primarySurface,
       body: Stack(
@@ -166,7 +173,8 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
                     // Registration form
                     if (!event.isPast &&
                         !_isRegistered &&
-                        event.registrationFields.isNotEmpty) ...[
+                        event.registrationFields.isNotEmpty &&
+                        !isFacultyView) ...[
                       _buildFormSection(),
                       const SizedBox(height: AppSpacing.lg),
                     ],
@@ -179,7 +187,8 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
           ),
 
           // ─── Sticky bottom bar ─────────────────────────────────────
-          if (!event.isPast) _buildBottomBar(),
+          if (!event.isPast || (isFacultyView && (currentUser?.role == UserRole.coordinator || currentUser?.role == UserRole.hod)))
+            _buildBottomBar(isFacultyView, currentUser),
         ],
       ),
     );
@@ -778,7 +787,7 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
   // STICKY BOTTOM BAR
   // ═════════════════════════════════════════════════════════════════
 
-  Widget _buildBottomBar() {
+  Widget _buildBottomBar(bool isFacultyView, UserDoc? currentUser) {
     final isFull = event.isFull && !_isRegistered;
 
     return Positioned(
@@ -855,49 +864,79 @@ class _EventDetailScreenState extends State<EventDetailScreen> {
               flex: 3,
               child: SizedBox(
                 height: 48,
-                child: _isRegistered
-                    ? OutlinedButton.icon(
-                        onPressed: null,
-                        icon: const Icon(Icons.check_circle_rounded, size: 18),
-                        label: const Text('Registered'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.success,
-                          side: const BorderSide(color: AppColors.success),
-                          disabledForegroundColor: AppColors.success,
-                        ),
-                      )
-                    : ElevatedButton(
-                        onPressed: isFull
-                            ? null
-                            : _isSubmitting
-                                ? null
-                                : _handleRegister,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.accent,
-                          foregroundColor: AppColors.primary,
-                          disabledBackgroundColor:
-                              AppColors.textTertiary.withValues(alpha: 0.3),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: AppRadius.borderRadiusSm,
-                          ),
-                        ),
-                        child: _isSubmitting
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: AppColors.primary,
-                                ),
-                              )
-                            : Text(
-                                isFull ? 'Join Waitlist' : 'Register Now',
-                                style: GoogleFonts.poppins(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                ),
+                child: isFacultyView
+                    ? ((currentUser?.role == UserRole.coordinator || currentUser?.role == UserRole.hod) && event.isPast)
+                        ? ElevatedButton.icon(
+                            onPressed: () {
+                              context.push(
+                                '/admin/report',
+                                extra: event.id,
+                              );
+                            },
+                            icon: const Icon(Icons.summarize_outlined, size: 18),
+                            label: const Text('Generate Event Report'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.accent,
+                              foregroundColor: AppColors.primary,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: AppRadius.borderRadiusSm,
                               ),
-                      ),
+                            ),
+                          )
+                        : Center(
+                            child: Text(
+                              'Faculty view — registration not applicable',
+                              style: GoogleFonts.poppins(
+                                fontSize: 10,
+                                fontStyle: FontStyle.italic,
+                                color: AppColors.textTertiary,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          )
+                    : _isRegistered
+                        ? OutlinedButton.icon(
+                            onPressed: null,
+                            icon: const Icon(Icons.check_circle_rounded, size: 18),
+                            label: const Text('Registered'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppColors.success,
+                              side: const BorderSide(color: AppColors.success),
+                              disabledForegroundColor: AppColors.success,
+                            ),
+                          )
+                        : ElevatedButton(
+                            onPressed: isFull
+                                ? null
+                                : _isSubmitting
+                                    ? null
+                                    : _handleRegister,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.accent,
+                              foregroundColor: AppColors.primary,
+                              disabledBackgroundColor:
+                                  AppColors.textTertiary.withValues(alpha: 0.3),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: AppRadius.borderRadiusSm,
+                              ),
+                            ),
+                            child: _isSubmitting
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: AppColors.primary,
+                                    ),
+                                  )
+                                : Text(
+                                    isFull ? 'Join Waitlist' : 'Register Now',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                          ),
               ),
             ),
           ],

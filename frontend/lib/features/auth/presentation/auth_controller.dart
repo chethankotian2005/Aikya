@@ -22,6 +22,20 @@ class AuthController extends AsyncNotifier<void> {
     });
   }
 
+  Future<void> loginWithFacultyId(String facultyId, String password) async {
+    state = const AsyncValue.loading();
+    state = await AsyncValue.guard(() async {
+      await _firebaseService.signInWithFacultyIdAndPassword(facultyId, password);
+    });
+  }
+
+  Future<void> updatePassword(String newPassword) async {
+    state = const AsyncValue.loading();
+    state = await AsyncValue.guard(() async {
+      await _firebaseService.updatePasswordAndClearResetFlag(newPassword);
+    });
+  }
+
   Future<void> signUpWithUsn({
     required String name,
     required String phone,

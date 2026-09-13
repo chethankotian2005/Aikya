@@ -15,7 +15,7 @@ T _$identity<T>(T value) => value;
 /// @nodoc
 mixin _$MemoryFrameDoc {
 
- String get id; String get uploadedBy; String get imageUrl; String get caption; String get eventName; String get batchYear; FrameStatus get status; String? get approvedBy; int get likesCount;@DateTimeConverter() DateTime get createdAt;
+ String get id; String get uploadedBy; String get imageUrl; String get caption; String get eventName; String? get eventId; String get batchYear; FrameStatus get status; String? get approvedBy; int get likesCount; String? get reportMarkdown;@DateTimeConverter() DateTime get createdAt;
 /// Create a copy of MemoryFrameDoc
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -28,16 +28,16 @@ $MemoryFrameDocCopyWith<MemoryFrameDoc> get copyWith => _$MemoryFrameDocCopyWith
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is MemoryFrameDoc&&(identical(other.id, id) || other.id == id)&&(identical(other.uploadedBy, uploadedBy) || other.uploadedBy == uploadedBy)&&(identical(other.imageUrl, imageUrl) || other.imageUrl == imageUrl)&&(identical(other.caption, caption) || other.caption == caption)&&(identical(other.eventName, eventName) || other.eventName == eventName)&&(identical(other.batchYear, batchYear) || other.batchYear == batchYear)&&(identical(other.status, status) || other.status == status)&&(identical(other.approvedBy, approvedBy) || other.approvedBy == approvedBy)&&(identical(other.likesCount, likesCount) || other.likesCount == likesCount)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is MemoryFrameDoc&&(identical(other.id, id) || other.id == id)&&(identical(other.uploadedBy, uploadedBy) || other.uploadedBy == uploadedBy)&&(identical(other.imageUrl, imageUrl) || other.imageUrl == imageUrl)&&(identical(other.caption, caption) || other.caption == caption)&&(identical(other.eventName, eventName) || other.eventName == eventName)&&(identical(other.eventId, eventId) || other.eventId == eventId)&&(identical(other.batchYear, batchYear) || other.batchYear == batchYear)&&(identical(other.status, status) || other.status == status)&&(identical(other.approvedBy, approvedBy) || other.approvedBy == approvedBy)&&(identical(other.likesCount, likesCount) || other.likesCount == likesCount)&&(identical(other.reportMarkdown, reportMarkdown) || other.reportMarkdown == reportMarkdown)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,uploadedBy,imageUrl,caption,eventName,batchYear,status,approvedBy,likesCount,createdAt);
+int get hashCode => Object.hash(runtimeType,id,uploadedBy,imageUrl,caption,eventName,eventId,batchYear,status,approvedBy,likesCount,reportMarkdown,createdAt);
 
 @override
 String toString() {
-  return 'MemoryFrameDoc(id: $id, uploadedBy: $uploadedBy, imageUrl: $imageUrl, caption: $caption, eventName: $eventName, batchYear: $batchYear, status: $status, approvedBy: $approvedBy, likesCount: $likesCount, createdAt: $createdAt)';
+  return 'MemoryFrameDoc(id: $id, uploadedBy: $uploadedBy, imageUrl: $imageUrl, caption: $caption, eventName: $eventName, eventId: $eventId, batchYear: $batchYear, status: $status, approvedBy: $approvedBy, likesCount: $likesCount, reportMarkdown: $reportMarkdown, createdAt: $createdAt)';
 }
 
 
@@ -48,7 +48,7 @@ abstract mixin class $MemoryFrameDocCopyWith<$Res>  {
   factory $MemoryFrameDocCopyWith(MemoryFrameDoc value, $Res Function(MemoryFrameDoc) _then) = _$MemoryFrameDocCopyWithImpl;
 @useResult
 $Res call({
- String id, String uploadedBy, String imageUrl, String caption, String eventName, String batchYear, FrameStatus status, String? approvedBy, int likesCount,@DateTimeConverter() DateTime createdAt
+ String id, String uploadedBy, String imageUrl, String caption, String eventName, String? eventId, String batchYear, FrameStatus status, String? approvedBy, int likesCount, String? reportMarkdown,@DateTimeConverter() DateTime createdAt
 });
 
 
@@ -65,18 +65,20 @@ class _$MemoryFrameDocCopyWithImpl<$Res>
 
 /// Create a copy of MemoryFrameDoc
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? uploadedBy = null,Object? imageUrl = null,Object? caption = null,Object? eventName = null,Object? batchYear = null,Object? status = null,Object? approvedBy = freezed,Object? likesCount = null,Object? createdAt = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? uploadedBy = null,Object? imageUrl = null,Object? caption = null,Object? eventName = null,Object? eventId = freezed,Object? batchYear = null,Object? status = null,Object? approvedBy = freezed,Object? likesCount = null,Object? reportMarkdown = freezed,Object? createdAt = null,}) {
   return _then(_self.copyWith(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,uploadedBy: null == uploadedBy ? _self.uploadedBy : uploadedBy // ignore: cast_nullable_to_non_nullable
 as String,imageUrl: null == imageUrl ? _self.imageUrl : imageUrl // ignore: cast_nullable_to_non_nullable
 as String,caption: null == caption ? _self.caption : caption // ignore: cast_nullable_to_non_nullable
 as String,eventName: null == eventName ? _self.eventName : eventName // ignore: cast_nullable_to_non_nullable
-as String,batchYear: null == batchYear ? _self.batchYear : batchYear // ignore: cast_nullable_to_non_nullable
+as String,eventId: freezed == eventId ? _self.eventId : eventId // ignore: cast_nullable_to_non_nullable
+as String?,batchYear: null == batchYear ? _self.batchYear : batchYear // ignore: cast_nullable_to_non_nullable
 as String,status: null == status ? _self.status : status // ignore: cast_nullable_to_non_nullable
 as FrameStatus,approvedBy: freezed == approvedBy ? _self.approvedBy : approvedBy // ignore: cast_nullable_to_non_nullable
 as String?,likesCount: null == likesCount ? _self.likesCount : likesCount // ignore: cast_nullable_to_non_nullable
-as int,createdAt: null == createdAt ? _self.createdAt : createdAt // ignore: cast_nullable_to_non_nullable
+as int,reportMarkdown: freezed == reportMarkdown ? _self.reportMarkdown : reportMarkdown // ignore: cast_nullable_to_non_nullable
+as String?,createdAt: null == createdAt ? _self.createdAt : createdAt // ignore: cast_nullable_to_non_nullable
 as DateTime,
   ));
 }
@@ -162,10 +164,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String uploadedBy,  String imageUrl,  String caption,  String eventName,  String batchYear,  FrameStatus status,  String? approvedBy,  int likesCount, @DateTimeConverter()  DateTime createdAt)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String uploadedBy,  String imageUrl,  String caption,  String eventName,  String? eventId,  String batchYear,  FrameStatus status,  String? approvedBy,  int likesCount,  String? reportMarkdown, @DateTimeConverter()  DateTime createdAt)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _MemoryFrameDoc() when $default != null:
-return $default(_that.id,_that.uploadedBy,_that.imageUrl,_that.caption,_that.eventName,_that.batchYear,_that.status,_that.approvedBy,_that.likesCount,_that.createdAt);case _:
+return $default(_that.id,_that.uploadedBy,_that.imageUrl,_that.caption,_that.eventName,_that.eventId,_that.batchYear,_that.status,_that.approvedBy,_that.likesCount,_that.reportMarkdown,_that.createdAt);case _:
   return orElse();
 
 }
@@ -183,10 +185,10 @@ return $default(_that.id,_that.uploadedBy,_that.imageUrl,_that.caption,_that.eve
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String uploadedBy,  String imageUrl,  String caption,  String eventName,  String batchYear,  FrameStatus status,  String? approvedBy,  int likesCount, @DateTimeConverter()  DateTime createdAt)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String uploadedBy,  String imageUrl,  String caption,  String eventName,  String? eventId,  String batchYear,  FrameStatus status,  String? approvedBy,  int likesCount,  String? reportMarkdown, @DateTimeConverter()  DateTime createdAt)  $default,) {final _that = this;
 switch (_that) {
 case _MemoryFrameDoc():
-return $default(_that.id,_that.uploadedBy,_that.imageUrl,_that.caption,_that.eventName,_that.batchYear,_that.status,_that.approvedBy,_that.likesCount,_that.createdAt);case _:
+return $default(_that.id,_that.uploadedBy,_that.imageUrl,_that.caption,_that.eventName,_that.eventId,_that.batchYear,_that.status,_that.approvedBy,_that.likesCount,_that.reportMarkdown,_that.createdAt);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -203,10 +205,10 @@ return $default(_that.id,_that.uploadedBy,_that.imageUrl,_that.caption,_that.eve
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String uploadedBy,  String imageUrl,  String caption,  String eventName,  String batchYear,  FrameStatus status,  String? approvedBy,  int likesCount, @DateTimeConverter()  DateTime createdAt)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String uploadedBy,  String imageUrl,  String caption,  String eventName,  String? eventId,  String batchYear,  FrameStatus status,  String? approvedBy,  int likesCount,  String? reportMarkdown, @DateTimeConverter()  DateTime createdAt)?  $default,) {final _that = this;
 switch (_that) {
 case _MemoryFrameDoc() when $default != null:
-return $default(_that.id,_that.uploadedBy,_that.imageUrl,_that.caption,_that.eventName,_that.batchYear,_that.status,_that.approvedBy,_that.likesCount,_that.createdAt);case _:
+return $default(_that.id,_that.uploadedBy,_that.imageUrl,_that.caption,_that.eventName,_that.eventId,_that.batchYear,_that.status,_that.approvedBy,_that.likesCount,_that.reportMarkdown,_that.createdAt);case _:
   return null;
 
 }
@@ -218,7 +220,7 @@ return $default(_that.id,_that.uploadedBy,_that.imageUrl,_that.caption,_that.eve
 @JsonSerializable()
 
 class _MemoryFrameDoc implements MemoryFrameDoc {
-  const _MemoryFrameDoc({required this.id, required this.uploadedBy, required this.imageUrl, required this.caption, required this.eventName, required this.batchYear, this.status = FrameStatus.pending, this.approvedBy, this.likesCount = 0, @DateTimeConverter() required this.createdAt});
+  const _MemoryFrameDoc({required this.id, required this.uploadedBy, required this.imageUrl, required this.caption, required this.eventName, this.eventId, required this.batchYear, this.status = FrameStatus.pending, this.approvedBy, this.likesCount = 0, this.reportMarkdown, @DateTimeConverter() required this.createdAt});
   factory _MemoryFrameDoc.fromJson(Map<String, dynamic> json) => _$MemoryFrameDocFromJson(json);
 
 @override final  String id;
@@ -226,10 +228,12 @@ class _MemoryFrameDoc implements MemoryFrameDoc {
 @override final  String imageUrl;
 @override final  String caption;
 @override final  String eventName;
+@override final  String? eventId;
 @override final  String batchYear;
 @override@JsonKey() final  FrameStatus status;
 @override final  String? approvedBy;
 @override@JsonKey() final  int likesCount;
+@override final  String? reportMarkdown;
 @override@DateTimeConverter() final  DateTime createdAt;
 
 /// Create a copy of MemoryFrameDoc
@@ -245,16 +249,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _MemoryFrameDoc&&(identical(other.id, id) || other.id == id)&&(identical(other.uploadedBy, uploadedBy) || other.uploadedBy == uploadedBy)&&(identical(other.imageUrl, imageUrl) || other.imageUrl == imageUrl)&&(identical(other.caption, caption) || other.caption == caption)&&(identical(other.eventName, eventName) || other.eventName == eventName)&&(identical(other.batchYear, batchYear) || other.batchYear == batchYear)&&(identical(other.status, status) || other.status == status)&&(identical(other.approvedBy, approvedBy) || other.approvedBy == approvedBy)&&(identical(other.likesCount, likesCount) || other.likesCount == likesCount)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _MemoryFrameDoc&&(identical(other.id, id) || other.id == id)&&(identical(other.uploadedBy, uploadedBy) || other.uploadedBy == uploadedBy)&&(identical(other.imageUrl, imageUrl) || other.imageUrl == imageUrl)&&(identical(other.caption, caption) || other.caption == caption)&&(identical(other.eventName, eventName) || other.eventName == eventName)&&(identical(other.eventId, eventId) || other.eventId == eventId)&&(identical(other.batchYear, batchYear) || other.batchYear == batchYear)&&(identical(other.status, status) || other.status == status)&&(identical(other.approvedBy, approvedBy) || other.approvedBy == approvedBy)&&(identical(other.likesCount, likesCount) || other.likesCount == likesCount)&&(identical(other.reportMarkdown, reportMarkdown) || other.reportMarkdown == reportMarkdown)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,uploadedBy,imageUrl,caption,eventName,batchYear,status,approvedBy,likesCount,createdAt);
+int get hashCode => Object.hash(runtimeType,id,uploadedBy,imageUrl,caption,eventName,eventId,batchYear,status,approvedBy,likesCount,reportMarkdown,createdAt);
 
 @override
 String toString() {
-  return 'MemoryFrameDoc(id: $id, uploadedBy: $uploadedBy, imageUrl: $imageUrl, caption: $caption, eventName: $eventName, batchYear: $batchYear, status: $status, approvedBy: $approvedBy, likesCount: $likesCount, createdAt: $createdAt)';
+  return 'MemoryFrameDoc(id: $id, uploadedBy: $uploadedBy, imageUrl: $imageUrl, caption: $caption, eventName: $eventName, eventId: $eventId, batchYear: $batchYear, status: $status, approvedBy: $approvedBy, likesCount: $likesCount, reportMarkdown: $reportMarkdown, createdAt: $createdAt)';
 }
 
 
@@ -265,7 +269,7 @@ abstract mixin class _$MemoryFrameDocCopyWith<$Res> implements $MemoryFrameDocCo
   factory _$MemoryFrameDocCopyWith(_MemoryFrameDoc value, $Res Function(_MemoryFrameDoc) _then) = __$MemoryFrameDocCopyWithImpl;
 @override @useResult
 $Res call({
- String id, String uploadedBy, String imageUrl, String caption, String eventName, String batchYear, FrameStatus status, String? approvedBy, int likesCount,@DateTimeConverter() DateTime createdAt
+ String id, String uploadedBy, String imageUrl, String caption, String eventName, String? eventId, String batchYear, FrameStatus status, String? approvedBy, int likesCount, String? reportMarkdown,@DateTimeConverter() DateTime createdAt
 });
 
 
@@ -282,18 +286,20 @@ class __$MemoryFrameDocCopyWithImpl<$Res>
 
 /// Create a copy of MemoryFrameDoc
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? uploadedBy = null,Object? imageUrl = null,Object? caption = null,Object? eventName = null,Object? batchYear = null,Object? status = null,Object? approvedBy = freezed,Object? likesCount = null,Object? createdAt = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? uploadedBy = null,Object? imageUrl = null,Object? caption = null,Object? eventName = null,Object? eventId = freezed,Object? batchYear = null,Object? status = null,Object? approvedBy = freezed,Object? likesCount = null,Object? reportMarkdown = freezed,Object? createdAt = null,}) {
   return _then(_MemoryFrameDoc(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,uploadedBy: null == uploadedBy ? _self.uploadedBy : uploadedBy // ignore: cast_nullable_to_non_nullable
 as String,imageUrl: null == imageUrl ? _self.imageUrl : imageUrl // ignore: cast_nullable_to_non_nullable
 as String,caption: null == caption ? _self.caption : caption // ignore: cast_nullable_to_non_nullable
 as String,eventName: null == eventName ? _self.eventName : eventName // ignore: cast_nullable_to_non_nullable
-as String,batchYear: null == batchYear ? _self.batchYear : batchYear // ignore: cast_nullable_to_non_nullable
+as String,eventId: freezed == eventId ? _self.eventId : eventId // ignore: cast_nullable_to_non_nullable
+as String?,batchYear: null == batchYear ? _self.batchYear : batchYear // ignore: cast_nullable_to_non_nullable
 as String,status: null == status ? _self.status : status // ignore: cast_nullable_to_non_nullable
 as FrameStatus,approvedBy: freezed == approvedBy ? _self.approvedBy : approvedBy // ignore: cast_nullable_to_non_nullable
 as String?,likesCount: null == likesCount ? _self.likesCount : likesCount // ignore: cast_nullable_to_non_nullable
-as int,createdAt: null == createdAt ? _self.createdAt : createdAt // ignore: cast_nullable_to_non_nullable
+as int,reportMarkdown: freezed == reportMarkdown ? _self.reportMarkdown : reportMarkdown // ignore: cast_nullable_to_non_nullable
+as String?,createdAt: null == createdAt ? _self.createdAt : createdAt // ignore: cast_nullable_to_non_nullable
 as DateTime,
   ));
 }

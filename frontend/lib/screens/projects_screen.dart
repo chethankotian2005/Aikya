@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:go_router/go_router.dart';
+
 import '../core/theme/app_tokens.dart';
 import '../models/project_model.dart';
 import '../widgets/shared_widgets.dart';
+import 'student_directory_screen.dart';
 
 /// A Pinterest-style masonry grid showing student ML projects.
 class ProjectsScreen extends StatefulWidget {
@@ -33,34 +36,52 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.primarySurface,
-      body: SafeArea(
-        bottom: false,
-        child: Column(
-          children: [
-            _buildAppBar(),
-            _buildFilterBar(),
-            Expanded(
-              child: _filteredProjects.isEmpty
-                  ? _buildEmptyState()
-                  : _buildMasonryGrid(),
-            ),
-          ],
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        backgroundColor: AppColors.primarySurface,
+        body: SafeArea(
+          bottom: false,
+          child: Column(
+            children: [
+              _buildAppBar(),
+              const SizedBox(height: 8),
+              _buildTabBar(),
+              Expanded(
+                child: TabBarView(
+                  children: [
+                    // Tab 1: Showcase
+                    Column(
+                      children: [
+                        _buildFilterBar(),
+                        Expanded(
+                          child: _filteredProjects.isEmpty
+                              ? _buildEmptyState()
+                              : _buildMasonryGrid(),
+                        ),
+                      ],
+                    ),
+                    // Tab 2: Directory
+                    const StudentDirectoryScreen(),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          // Submit new project action
-        },
-        backgroundColor: AppColors.accent,
-        foregroundColor: AppColors.primary,
-        icon: const Icon(Icons.add_rounded),
-        label: Text(
-          'Submit Project',
-          style: GoogleFonts.poppins(
-            fontWeight: FontWeight.w600,
-            fontSize: 14,
+        floatingActionButton: FloatingActionButton.extended(
+          onPressed: () {
+            // Submit new project action
+          },
+          backgroundColor: AppColors.accent,
+          foregroundColor: AppColors.primary,
+          icon: const Icon(Icons.add_rounded),
+          label: Text(
+            'Submit Project',
+            style: GoogleFonts.poppins(
+              fontWeight: FontWeight.w600,
+              fontSize: 14,
+            ),
           ),
         ),
       ),
@@ -99,6 +120,40 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
               ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  // ─── Tab Bar ──────────────────────────────────────────────────────
+  Widget _buildTabBar() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 20),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceElevated,
+        borderRadius: AppRadius.borderRadiusLg,
+        border: Border.all(color: AppColors.border),
+      ),
+      child: TabBar(
+        indicator: BoxDecoration(
+          borderRadius: AppRadius.borderRadiusLg,
+          color: AppColors.accent,
+        ),
+        indicatorSize: TabBarIndicatorSize.tab,
+        dividerColor: Colors.transparent,
+        labelColor: AppColors.primary,
+        unselectedLabelColor: AppColors.textSecondary,
+        labelStyle: GoogleFonts.poppins(
+          fontWeight: FontWeight.w600,
+          fontSize: 14,
+        ),
+        unselectedLabelStyle: GoogleFonts.poppins(
+          fontWeight: FontWeight.w500,
+          fontSize: 14,
+        ),
+        tabs: const [
+          Tab(text: 'Showcase'),
+          Tab(text: 'Directory'),
         ],
       ),
     );
@@ -190,14 +245,16 @@ class _ProjectTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surfaceElevated,
-        borderRadius: AppRadius.borderRadiusMd,
-        border: Border.all(color: AppColors.border),
-        boxShadow: AppShadows.sm,
-      ),
-      clipBehavior: Clip.antiAlias,
+    return GestureDetector(
+      onTap: () => context.push('/projects/detail/${project.id}', extra: project),
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppColors.surfaceElevated,
+          borderRadius: AppRadius.borderRadiusMd,
+          border: Border.all(color: AppColors.border),
+          boxShadow: AppShadows.sm,
+        ),
+        clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -207,7 +264,7 @@ class _ProjectTile extends StatelessWidget {
               AspectRatio(
                 aspectRatio: 1 / project.imageHeightMultiplier,
                 child: Image.asset(
-                  project.imageAsset,
+                  project.imageUrls.isNotEmpty ? project.imageUrls.first : 'assets/images/placeholder.jpg',
                   fit: BoxFit.cover,
                 ),
               ),
@@ -296,6 +353,7 @@ class _ProjectTile extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 }

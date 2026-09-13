@@ -9,8 +9,11 @@ abstract class ProjectDoc with _$ProjectDoc {
   const factory ProjectDoc({
     required String id,
     required String title,
-    required String author,
-    required String imageAsset,
+    @Default('') String description,
+    required String author, // Keep for backward compatibility/display name
+    required String ownerId,
+    @Default([]) List<String> contributorIds,
+    @Default([]) List<String> imageUrls,
     required List<String> tags,
     @Default(false) bool lookingForTeammate,
   }) = _ProjectDoc;

@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:infinite_scroll_pagination/infinite_scroll_pagination.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 
 import '../core/theme/app_tokens.dart';
 import '../features/memories/data/memory_frame_doc.dart';
@@ -168,6 +169,20 @@ class _MemoryWallScreenState extends State<MemoryWallScreen> {
                 ),
                 child: Stack(
                   children: [
+                    if (photo.reportMarkdown != null)
+                      Positioned(
+                        top: 8,
+                        right: 8,
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: AppColors.accent,
+                            shape: BoxShape.circle,
+                            boxShadow: AppShadows.sm,
+                          ),
+                          child: const Icon(Icons.article_rounded, size: 16, color: Colors.white),
+                        ),
+                      ),
                     Positioned(
                       bottom: 0,
                       left: 0,
@@ -229,6 +244,16 @@ class _MemoryWallScreenState extends State<MemoryWallScreen> {
   }
 
   void _openLightbox(BuildContext context, int initialIndex) {
+    final photo = _pagingController.itemList![initialIndex];
+    if (photo.reportMarkdown != null) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => _ReportReaderScreen(photo: photo),
+        ),
+      );
+      return;
+    }
+
     Navigator.of(context).push(
       PageRouteBuilder(
         opaque: false,
@@ -437,6 +462,82 @@ class _LightboxScreenState extends State<_LightboxScreen> {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _ReportReaderScreen extends StatelessWidget {
+  final MemoryFrameDoc photo;
+
+  const _ReportReaderScreen({required this.photo});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.primarySurface,
+      body: CustomScrollView(
+        slivers: [
+          SliverAppBar(
+            expandedHeight: 300,
+            pinned: true,
+            backgroundColor: AppColors.surfaceElevated,
+            flexibleSpace: FlexibleSpaceBar(
+              background: Hero(
+                tag: 'photo_${photo.id}',
+                child: photo.imageUrl.startsWith('http')
+                    ? Image.network(photo.imageUrl, fit: BoxFit.cover)
+                    : Image.asset(photo.imageUrl, fit: BoxFit.cover),
+              ),
+            ),
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+              style: IconButton.styleFrom(backgroundColor: Colors.black45),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+          ),
+          SliverToBoxAdapter(
+            child: Container(
+              color: AppColors.primarySurface,
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        photo.eventName,
+                        style: GoogleFonts.poppins(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.accent,
+                        ),
+                      ),
+                      Text(
+                        'Published by ${photo.uploadedBy}',
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          color: AppColors.textTertiary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  MarkdownBody(
+                    data: photo.reportMarkdown ?? '',
+                    styleSheet: MarkdownStyleSheet(
+                      h1: GoogleFonts.poppins(fontSize: 24, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
+                      h2: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.textSecondary),
+                      p: GoogleFonts.poppins(fontSize: 14, color: AppColors.textSecondary, height: 1.6),
+                    ),
+                  ),
+                  const SizedBox(height: 48),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

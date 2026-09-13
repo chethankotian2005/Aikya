@@ -6,8 +6,8 @@ part 'user_doc.g.dart';
 
 enum UserRole {
   hod,
-  @JsonValue('event_faculty') eventFaculty,
-  @JsonValue('regular_faculty') regularFaculty,
+  @JsonValue('coordinator') coordinator,
+  @JsonValue('faculty') faculty,
   assistant,
   student;
 
@@ -15,16 +15,41 @@ enum UserRole {
     switch (this) {
       case UserRole.hod:
         return 'hod';
-      case UserRole.eventFaculty:
-        return 'event_faculty';
-      case UserRole.regularFaculty:
-        return 'regular_faculty';
+      case UserRole.coordinator:
+        return 'coordinator';
+      case UserRole.faculty:
+        return 'faculty';
       case UserRole.assistant:
         return 'assistant';
       case UserRole.student:
         return 'student';
     }
   }
+}
+
+@freezed
+class PrivacySettings with _$PrivacySettings {
+  const factory PrivacySettings({
+    @Default(true) bool publicBio,
+    @Default(true) bool publicGithub,
+    @Default(true) bool publicLinkedin,
+    @Default(true) bool publicPersonalWebsite,
+    @Default(true) bool publicInstagram,
+    @Default(true) bool publicTwitter,
+  }) = _PrivacySettings;
+
+  factory PrivacySettings.fromJson(Map<String, dynamic> json) => _$PrivacySettingsFromJson(json);
+}
+
+@freezed
+class NotificationSettings with _$NotificationSettings {
+  const factory NotificationSettings({
+    @Default(true) bool eventsEnabled,
+    @Default(true) bool updatesEnabled,
+    @Default(true) bool memoriesEnabled,
+  }) = _NotificationSettings;
+
+  factory NotificationSettings.fromJson(Map<String, dynamic> json) => _$NotificationSettingsFromJson(json);
 }
 
 @freezed
@@ -49,17 +74,24 @@ abstract class UserDoc with _$UserDoc {
     String? twitterHandle,
     String? discordHandle,
     String? status, // e.g. pending_batch_review
+    @Default(false) bool mustResetPassword,
+    String? facultyId,
+    String? designation,
+    String? club,
+    String? fcmToken,
+    @Default(PrivacySettings()) PrivacySettings privacySettings,
+    @Default(NotificationSettings()) NotificationSettings notificationSettings,
     @DateTimeConverter() DateTime? createdAt,
   }) = _UserDoc;
 
   factory UserDoc.fromJson(Map<String, dynamic> json) => _$UserDocFromJson(json);
 }
-
-class DateTimeConverter implements JsonConverter<DateTime, dynamic> {
+class DateTimeConverter implements JsonConverter<DateTime?, dynamic> {
   const DateTimeConverter();
 
   @override
-  DateTime fromJson(dynamic json) {
+  DateTime? fromJson(dynamic json) {
+    if (json == null) return null;
     if (json is Timestamp) {
       return json.toDate();
     }
@@ -75,7 +107,8 @@ class DateTimeConverter implements JsonConverter<DateTime, dynamic> {
   }
 
   @override
-  dynamic toJson(DateTime object) {
+  dynamic toJson(DateTime? object) {
+    if (object == null) return null;
     return object.toIso8601String();
   }
 }

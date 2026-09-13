@@ -62,6 +62,43 @@ class FirebaseService {
     return '$sanitizedUsn@aikya.smvitm.edu';
   }
 
+  // Convert Faculty ID to dummy email for Firebase Auth
+  String _facultyIdToEmail(String facultyId) {
+    final sanitizedId = facultyId.trim().toLowerCase().replaceAll(' ', '');
+    return '$sanitizedId@aikya.internal';
+  }
+
+  // --- Auth Methods ---
+  
+  Future<void> signInWithFacultyIdAndPassword(String facultyId, String password) async {
+    try {
+      final email = _facultyIdToEmail(facultyId);
+      await auth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<void> updatePasswordAndClearResetFlag(String newPassword) async {
+    final user = auth.currentUser;
+    if (user == null) throw Exception('User not authenticated');
+
+    try {
+      // 1. Update password in Firebase Auth
+      await user.updatePassword(newPassword);
+
+      // 2. Clear mustResetPassword flag in Firestore
+      await firestore.collection('users').doc(user.uid).update({
+        'mustResetPassword': false,
+      });
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   // --- Auth Methods ---
   
   Future<void> signInWithUsnAndPassword(String usn, String password) async {
@@ -141,5 +178,24 @@ class FirebaseService {
     });
 
     return cred;
+  }
+
+  // --- Directory Methods ---
+  Future<List<UserDoc>> getStudentDirectory() async {
+    try {
+      final snapshot = await firestore
+          .collection('users')
+          .where('role', isEqualTo: 'student')
+          .get();
+
+      return snapshot.docs.map((doc) {
+        final data = doc.data();
+        data['uid'] = doc.id;
+        return UserDoc.fromJson(data);
+      }).toList();
+    } catch (e) {
+      print('Error fetching student directory: $e');
+      return [];
+    }
   }
 }

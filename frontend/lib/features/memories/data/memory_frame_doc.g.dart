@@ -13,13 +13,15 @@ _MemoryFrameDoc _$MemoryFrameDocFromJson(Map<String, dynamic> json) =>
       imageUrl: json['imageUrl'] as String,
       caption: json['caption'] as String,
       eventName: json['eventName'] as String,
+      eventId: json['eventId'] as String?,
       batchYear: json['batchYear'] as String,
       status:
           $enumDecodeNullable(_$FrameStatusEnumMap, json['status']) ??
           FrameStatus.pending,
       approvedBy: json['approvedBy'] as String?,
       likesCount: (json['likesCount'] as num?)?.toInt() ?? 0,
-      createdAt: const DateTimeConverter().fromJson(json['createdAt']),
+      reportMarkdown: json['reportMarkdown'] as String?,
+      createdAt: DateTime.parse(json['createdAt'] as String),
     );
 
 Map<String, dynamic> _$MemoryFrameDocToJson(_MemoryFrameDoc instance) =>
@@ -29,11 +31,13 @@ Map<String, dynamic> _$MemoryFrameDocToJson(_MemoryFrameDoc instance) =>
       'imageUrl': instance.imageUrl,
       'caption': instance.caption,
       'eventName': instance.eventName,
+      'eventId': instance.eventId,
       'batchYear': instance.batchYear,
       'status': _$FrameStatusEnumMap[instance.status]!,
       'approvedBy': instance.approvedBy,
       'likesCount': instance.likesCount,
-      'createdAt': const DateTimeConverter().toJson(instance.createdAt),
+      'reportMarkdown': instance.reportMarkdown,
+      'createdAt': instance.createdAt.toIso8601String(),
     };
 
 const _$FrameStatusEnumMap = {

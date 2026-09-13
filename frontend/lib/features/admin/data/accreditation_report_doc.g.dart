@@ -16,7 +16,7 @@ _AccreditationReportDoc _$AccreditationReportDocFromJson(
       .map((e) => e as String)
       .toList(),
   pdfUrl: json['pdfUrl'] as String,
-  generatedAt: const DateTimeConverter().fromJson(json['generatedAt']),
+  generatedAt: DateTime.parse(json['generatedAt'] as String),
 );
 
 Map<String, dynamic> _$AccreditationReportDocToJson(
@@ -27,5 +27,5 @@ Map<String, dynamic> _$AccreditationReportDocToJson(
   'compiledBy': instance.compiledBy,
   'includedEventIds': instance.includedEventIds,
   'pdfUrl': instance.pdfUrl,
-  'generatedAt': const DateTimeConverter().toJson(instance.generatedAt),
+  'generatedAt': instance.generatedAt.toIso8601String(),
 };

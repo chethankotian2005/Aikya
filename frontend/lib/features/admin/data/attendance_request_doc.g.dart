@@ -18,8 +18,8 @@ _AttendanceRequestDoc _$AttendanceRequestDocFromJson(
       AttendanceStatus.pending,
   reviewedBy: json['reviewedBy'] as String?,
   reviewNotes: json['reviewNotes'] as String?,
-  createdAt: const DateTimeConverter().fromJson(json['createdAt']),
-  updatedAt: const DateTimeConverter().fromJson(json['updatedAt']),
+  createdAt: DateTime.parse(json['createdAt'] as String),
+  updatedAt: DateTime.parse(json['updatedAt'] as String),
 );
 
 Map<String, dynamic> _$AttendanceRequestDocToJson(
@@ -32,8 +32,8 @@ Map<String, dynamic> _$AttendanceRequestDocToJson(
   'status': _$AttendanceStatusEnumMap[instance.status]!,
   'reviewedBy': instance.reviewedBy,
   'reviewNotes': instance.reviewNotes,
-  'createdAt': const DateTimeConverter().toJson(instance.createdAt),
-  'updatedAt': const DateTimeConverter().toJson(instance.updatedAt),
+  'createdAt': instance.createdAt.toIso8601String(),
+  'updatedAt': instance.updatedAt.toIso8601String(),
 };
 
 const _$AttendanceStatusEnumMap = {

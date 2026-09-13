@@ -1,20 +1,34 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/theme/app_tokens.dart';
 import '../widgets/shared_widgets.dart';
+import '../services/messaging_service.dart';
+import '../features/auth/data/user_doc.dart';
 
 /// Student home screen with greeting header, stat pills, event carousel,
 /// activity feed, and bottom navigation.
-class HomeScreen extends StatefulWidget {
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends ConsumerState<HomeScreen> {
   int _navIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final user = ref.read(currentUserDocProvider).value;
+      if (user != null) {
+        ref.read(messagingServiceProvider).requestPermissionAndSetup(user);
+      }
+    });
+  }
 
   String get _greeting {
     final hour = DateTime.now().hour;

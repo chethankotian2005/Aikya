@@ -1,19 +1,46 @@
+import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:native_exif/native_exif.dart';
+import 'package:http/http.dart' as http;
+import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:uuid/uuid.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+
 import '../../core/theme/app_tokens.dart';
+import '../../services/firebase_service.dart';
+import '../../features/memories/data/memory_frame_doc.dart';
 
-class AdminReportGeneratorView extends StatefulWidget {
-  const AdminReportGeneratorView({super.key});
+class PhotoWithMetadata {
+  final File file;
+  final String? gps;
+  final String? timestamp;
 
-  @override
-  State<AdminReportGeneratorView> createState() => _AdminReportGeneratorViewState();
+  PhotoWithMetadata(this.file, this.gps, this.timestamp);
 }
 
-class _AdminReportGeneratorViewState extends State<AdminReportGeneratorView> {
+class AdminReportGeneratorView extends ConsumerStatefulWidget {
+  final String? eventId;
+  const AdminReportGeneratorView({super.key, this.eventId});
+
+  @override
+  ConsumerState<AdminReportGeneratorView> createState() => _AdminReportGeneratorViewState();
+}
+
+class _AdminReportGeneratorViewState extends ConsumerState<AdminReportGeneratorView> {
   final TextEditingController _summaryController = TextEditingController();
-  bool _imageUploaded = false;
+  final List<PhotoWithMetadata> _photos = [];
   bool _isGenerating = false;
-  bool _reportGenerated = false;
+  String? _generatedMarkdown;
+  bool _isPublishing = false;
 
   @override
   void dispose() {
@@ -21,16 +48,42 @@ class _AdminReportGeneratorViewState extends State<AdminReportGeneratorView> {
     super.dispose();
   }
 
-  void _simulateImageUpload() {
-    setState(() {
-      _imageUploaded = true;
-    });
+  Future<void> _pickImages() async {
+    final picker = ImagePicker();
+    final pickedFiles = await picker.pickMultiImage();
+
+    if (pickedFiles.isNotEmpty) {
+      for (var pickedFile in pickedFiles) {
+        final file = File(pickedFile.path);
+        String? gpsData;
+        String? timestampData;
+
+        try {
+          final exif = await Exif.fromPath(file.path);
+          final latLong = await exif.getLatLong();
+          if (latLong != null) {
+            gpsData = '${latLong.latitude.toStringAsFixed(4)}° N, ${latLong.longitude.toStringAsFixed(4)}° E';
+          }
+          final date = await exif.getOriginalDate();
+          if (date != null) {
+            timestampData = date.toIso8601String();
+          }
+          await exif.close();
+        } catch (e) {
+          debugPrint('Error reading EXIF: $e');
+        }
+
+        setState(() {
+          _photos.add(PhotoWithMetadata(file, gpsData, timestampData));
+        });
+      }
+    }
   }
 
-  void _generateReport() async {
-    if (_summaryController.text.trim().isEmpty && !_imageUploaded) {
+  Future<void> _generateReport() async {
+    if (_summaryController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please provide a summary or an image first.')),
+        const SnackBar(content: Text('Please provide a summary.')),
       );
       return;
     }
@@ -39,30 +92,154 @@ class _AdminReportGeneratorViewState extends State<AdminReportGeneratorView> {
       _isGenerating = true;
     });
 
-    // Simulate AI generation delay
-    await Future.delayed(const Duration(seconds: 2));
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      final token = await user?.getIdToken();
 
-    if (mounted) {
-      setState(() {
-        _isGenerating = false;
-        _reportGenerated = true;
-      });
+      String additionalContext = 'Uploaded Photos Metadata:\n';
+      for (var i = 0; i < _photos.length; i++) {
+        final p = _photos[i];
+        additionalContext += 'Photo ${i + 1}: ${p.gps ?? "No GPS"}, ${p.timestamp ?? "No Timestamp"}\n';
+      }
+
+      final response = await http.post(
+        Uri.parse('http://localhost:3000/api/generate-report'), // Update this with correct backend URL if needed
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          'brief': _summaryController.text.trim(),
+          'eventId': widget.eventId,
+          'includeAttendance': true,
+          'additionalContext': additionalContext,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        setState(() {
+          _generatedMarkdown = data['markdown'];
+        });
+      } else {
+        throw Exception('Failed to generate report: ${response.body}');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), backgroundColor: AppColors.error),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isGenerating = false;
+        });
+      }
     }
   }
 
   void _reset() {
     setState(() {
       _summaryController.clear();
-      _imageUploaded = false;
-      _reportGenerated = false;
+      _photos.clear();
+      _generatedMarkdown = null;
     });
+  }
+
+  Future<void> _exportPdf() async {
+    if (_generatedMarkdown == null) return;
+    
+    final pdf = pw.Document();
+    
+    // Convert markdown to PDF. For a basic implementation, we just print the raw text, 
+    // but in a production app you'd use a Markdown to PDF parser or convert to widgets.
+    pdf.addPage(
+      pw.Page(
+        build: (pw.Context context) {
+          return pw.Text(_generatedMarkdown!);
+        },
+      ),
+    );
+
+    await Printing.layoutPdf(
+      onLayout: (PdfPageFormat format) async => pdf.save(),
+      name: 'Event_Report_${widget.eventId ?? 'Unknown'}.pdf',
+    );
+  }
+
+  Future<void> _publishToMemoryFrame() async {
+    if (_generatedMarkdown == null) return;
+
+    final user = ref.read(currentUserDocProvider).value;
+    if (user == null) return;
+
+    setState(() => _isPublishing = true);
+
+    try {
+      final storage = FirebaseStorage.instance;
+      final firestore = FirebaseFirestore.instance;
+
+      for (var i = 0; i < _photos.length; i++) {
+        final photo = _photos[i];
+        final id = const Uuid().v4();
+        
+        // Upload image
+        final ref = storage.ref().child('memories/$id.jpg');
+        await ref.putFile(photo.file);
+        final url = await ref.getDownloadURL();
+
+        // Include the report markdown on the first photo, so it acts as the primary report frame
+        final markdown = (i == 0) ? _generatedMarkdown : null;
+
+        final doc = MemoryFrameDoc(
+          id: id,
+          uploadedBy: user.fullName,
+          imageUrl: url,
+          caption: 'Event Memory', // Could ask user for custom caption per photo
+          eventName: 'Event ${widget.eventId ?? 'Unknown'}', // Could fetch actual event name
+          eventId: widget.eventId,
+          batchYear: '2026', // Ideally from event or user
+          status: FrameStatus.pending,
+          reportMarkdown: markdown,
+          createdAt: DateTime.now(),
+        );
+
+        await firestore.collection('memories').doc(id).set(doc.toJson());
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Successfully submitted to moderation queue!'), backgroundColor: AppColors.success),
+        );
+        Navigator.of(context).pop();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error publishing: $e'), backgroundColor: AppColors.error),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isPublishing = false);
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.primarySurface,
-      body: _reportGenerated ? _buildResultView() : _buildInputView(),
+      appBar: AppBar(
+        backgroundColor: AppColors.surfaceElevated,
+        title: Text(
+          'Generate Report',
+          style: GoogleFonts.poppins(color: AppColors.textPrimary, fontWeight: FontWeight.w600, fontSize: 16),
+        ),
+        iconTheme: const IconThemeData(color: AppColors.textPrimary),
+      ),
+      body: _generatedMarkdown != null ? _buildResultView() : _buildInputView(),
     );
   }
 
@@ -109,7 +286,7 @@ class _AdminReportGeneratorViewState extends State<AdminReportGeneratorView> {
               maxLines: 5,
               style: GoogleFonts.poppins(color: AppColors.textPrimary),
               decoration: InputDecoration(
-                hintText: 'e.g. 50 students attended the GenAI workshop. Covered RAG architecture and embeddings. Excellent feedback...',
+                hintText: 'e.g. 50 students attended the GenAI workshop. Covered RAG architecture and embeddings...',
                 hintStyle: GoogleFonts.poppins(color: AppColors.textTertiary),
                 filled: true,
                 fillColor: AppColors.surfaceElevated,
@@ -130,85 +307,106 @@ class _AdminReportGeneratorViewState extends State<AdminReportGeneratorView> {
             const SizedBox(height: 24),
             
             // Image Upload Zone
-            Text(
-              'Event Evidence (Photos)',
-              style: GoogleFonts.poppins(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textPrimary,
-              ),
-            ),
-            const SizedBox(height: 8),
-            GestureDetector(
-              onTap: _simulateImageUpload,
-              child: Container(
-                height: 200,
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceElevated,
-                  borderRadius: AppRadius.borderRadiusLg,
-                  border: Border.all(
-                    color: _imageUploaded ? AppColors.accent : AppColors.border,
-                    width: _imageUploaded ? 2 : 1,
-                    style: BorderStyle.solid,
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Event Evidence (Photos)',
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary,
                   ),
                 ),
-                clipBehavior: Clip.antiAlias,
-                child: _imageUploaded
-                    ? Stack(
-                        fit: StackFit.expand,
+                TextButton.icon(
+                  onPressed: _pickImages,
+                  icon: const Icon(Icons.add_photo_alternate_outlined),
+                  label: const Text('Add Photos'),
+                )
+              ],
+            ),
+            const SizedBox(height: 8),
+            
+            if (_photos.isEmpty)
+              GestureDetector(
+                onTap: _pickImages,
+                child: Container(
+                  height: 150,
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceElevated,
+                    borderRadius: AppRadius.borderRadiusLg,
+                    border: Border.all(
+                      color: AppColors.border,
+                    ),
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.add_a_photo_outlined, size: 48, color: AppColors.textTertiary),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Tap to upload event photos',
+                        style: GoogleFonts.poppins(
+                          color: AppColors.textSecondary,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else
+              SizedBox(
+                height: 200,
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _photos.length,
+                  itemBuilder: (context, index) {
+                    final photo = _photos[index];
+                    return Container(
+                      width: 250,
+                      margin: const EdgeInsets.only(right: 12),
+                      decoration: BoxDecoration(
+                        borderRadius: AppRadius.borderRadiusMd,
+                        image: DecorationImage(
+                          image: FileImage(photo.file),
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                      child: Stack(
                         children: [
-                          Image.asset(
-                            'assets/images/event_hackathon.jpg',
-                            fit: BoxFit.cover,
-                          ),
-                          Container(
-                            color: Colors.black.withValues(alpha: 0.4),
-                          ),
                           Positioned(
-                            top: 16,
-                            right: 16,
-                            child: IconButton(
-                              icon: const Icon(Icons.close_rounded, color: Colors.white),
-                              onPressed: () => setState(() => _imageUploaded = false),
-                            ),
-                          ),
-                          Positioned(
-                            bottom: 16,
-                            left: 16,
-                            child: Row(
+                            bottom: 8,
+                            left: 8,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                _exifChip(Icons.location_on_rounded, '13.2541° N, 74.7865° E'),
-                                const SizedBox(width: 8),
-                                _exifChip(Icons.access_time_rounded, '2026-09-15 14:32:00'),
+                                if (photo.gps != null) _exifChip(Icons.location_on_rounded, photo.gps!),
+                                if (photo.timestamp != null) ...[
+                                  const SizedBox(height: 4),
+                                  _exifChip(Icons.access_time_rounded, photo.timestamp!.substring(0, 16)),
+                                ],
                               ],
                             ),
                           ),
-                        ],
-                      )
-                    : Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.add_a_photo_outlined, size: 48, color: AppColors.textTertiary),
-                          const SizedBox(height: 16),
-                          Text(
-                            'Tap to upload event photos',
-                            style: GoogleFonts.poppins(
-                              color: AppColors.textSecondary,
-                              fontWeight: FontWeight.w500,
+                          Positioned(
+                            top: 4,
+                            right: 4,
+                            child: IconButton(
+                              icon: const Icon(Icons.cancel, color: Colors.white),
+                              onPressed: () {
+                                setState(() {
+                                  _photos.removeAt(index);
+                                });
+                              },
                             ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'JPEG, PNG (EXIF data will be extracted)',
-                            style: GoogleFonts.poppins(
-                              color: AppColors.textTertiary,
-                              fontSize: 12,
-                            ),
-                          ),
+                          )
                         ],
                       ),
+                    );
+                  },
+                ),
               ),
-            ),
             
             const SizedBox(height: 48),
             
@@ -230,7 +428,7 @@ class _AdminReportGeneratorViewState extends State<AdminReportGeneratorView> {
                         height: 24,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(AppColors.primary),
+                          color: AppColors.primary,
                         ),
                       )
                     : Row(
@@ -257,23 +455,21 @@ class _AdminReportGeneratorViewState extends State<AdminReportGeneratorView> {
 
   Widget _exifChip(IconData icon, String text) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.6),
+        color: Colors.black.withValues(alpha: 0.7),
         borderRadius: AppRadius.borderRadiusSm,
-        border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 12, color: AppColors.accent),
-          const SizedBox(width: 6),
+          Icon(icon, size: 10, color: AppColors.accent),
+          const SizedBox(width: 4),
           Text(
             text,
             style: GoogleFonts.robotoMono(
-              fontSize: 11,
+              fontSize: 9,
               color: Colors.white,
-              fontWeight: FontWeight.w600,
             ),
           ),
         ],
@@ -300,9 +496,9 @@ class _AdminReportGeneratorViewState extends State<AdminReportGeneratorView> {
                 Row(
                   children: [
                     OutlinedButton.icon(
-                      onPressed: () {},
-                      icon: const Icon(Icons.description_outlined, size: 18),
-                      label: const Text('Export .MD'),
+                      onPressed: _exportPdf,
+                      icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+                      label: const Text('Export PDF'),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: AppColors.textPrimary,
                         side: const BorderSide(color: AppColors.border),
@@ -310,9 +506,11 @@ class _AdminReportGeneratorViewState extends State<AdminReportGeneratorView> {
                     ),
                     const SizedBox(width: 12),
                     ElevatedButton.icon(
-                      onPressed: () {},
-                      icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
-                      label: const Text('Export PDF'),
+                      onPressed: _isPublishing ? null : _publishToMemoryFrame,
+                      icon: _isPublishing 
+                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          : const Icon(Icons.publish_rounded, size: 18),
+                      label: const Text('Publish to Memory Frame'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.accent,
                         foregroundColor: AppColors.primary,
@@ -360,68 +558,13 @@ class _AdminReportGeneratorViewState extends State<AdminReportGeneratorView> {
                   // Document Content
                   Padding(
                     padding: const EdgeInsets.all(40),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Letterhead / Title
-                        Center(
-                          child: Column(
-                            children: [
-                              Text(
-                                'DEPARTMENT OF AI & ML',
-                                style: GoogleFonts.poppins(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.black54,
-                                  letterSpacing: 1.5,
-                                ),
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                'EVENT ACCREDITATION REPORT',
-                                style: GoogleFonts.poppins(
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.w800,
-                                  color: Colors.black,
-                                  letterSpacing: -0.5,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Generated on: Sep 15, 2026',
-                                style: GoogleFonts.poppins(
-                                  fontSize: 12,
-                                  color: Colors.black45,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 48),
-                        
-                        _docSection('1. Executive Summary', 'The Department of Artificial Intelligence & Machine Learning organized a comprehensive hands-on workshop focused on Generative AI and Retrieval-Augmented Generation (RAG) architectures. The event successfully engaged 50 active students, bridging theoretical concepts with practical implementation using modern embeddings and vector databases.'),
-                        
-                        _docSection('2. Event Details', '''
-• Title: Introduction to GenAI & RAG
-• Venue: Main Seminar Hall, SMVITM
-• Date & Time: 2026-09-15 14:00:00
-• Verified GPS Coordinates: 13.2541° N, 74.7865° E (Extracted via EXIF)
-• Target Audience: 4th, 6th, and 8th Semester AI & ML Students
-• Total Attendance: 50 Students (Verified via AIML Hub QR scans)'''),
-
-                        _docSection('3. Key Outcomes & Feedback', 'Participants successfully built and deployed a micro-RAG pipeline locally. Feedback collected post-event indicated a 92% satisfaction rate, with students heavily requesting follow-up sessions on advanced LLM fine-tuning techniques.'),
-
-                        const SizedBox(height: 48),
-                        
-                        // Sign-off
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            _docSignature('Faculty Coordinator'),
-                            _docSignature('Head of Department'),
-                          ],
-                        ),
-                      ],
+                    child: MarkdownBody(
+                      data: _generatedMarkdown ?? '',
+                      styleSheet: MarkdownStyleSheet(
+                        h1: GoogleFonts.poppins(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black),
+                        h2: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w700, color: Colors.black87),
+                        p: GoogleFonts.poppins(fontSize: 14, color: Colors.black87, height: 1.6),
+                      ),
                     ),
                   ),
                 ],
@@ -431,55 +574,6 @@ class _AdminReportGeneratorViewState extends State<AdminReportGeneratorView> {
           ],
         ),
       ),
-    );
-  }
-
-  Widget _docSection(String title, String body) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 24.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: GoogleFonts.poppins(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              color: Colors.black87,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            body,
-            style: GoogleFonts.poppins(
-              fontSize: 14,
-              height: 1.6,
-              color: Colors.black87,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _docSignature(String role) {
-    return Column(
-      children: [
-        Container(
-          width: 150,
-          height: 1,
-          color: Colors.black26,
-        ),
-        const SizedBox(height: 8),
-        Text(
-          role,
-          style: GoogleFonts.poppins(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: Colors.black54,
-          ),
-        ),
-      ],
     );
   }
 }

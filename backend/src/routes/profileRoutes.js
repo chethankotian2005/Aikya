@@ -33,7 +33,8 @@ router.put('/profile', async (req, res) => {
       twitterHandle,
       discordHandle,
       profilePictureUrl,
-      flagForHodReview
+      flagForHodReview,
+      privacySettings
     } = req.body;
     
     const parsedUsn = parseUsn(usn);
@@ -53,11 +54,6 @@ router.put('/profile', async (req, res) => {
     if (configDoc.exists) {
       const config = configDoc.data();
       yearOfStudy = config.yearOfStudy?.toString();
-      batch = config.label; // or whatever batch field corresponds to. Wait, batch is batch year or label?
-      // The frontend displayed `$_yearOfStudy Year, $_batch`. 
-      // E.g., '4 Year, Final Year' -> label: "Final Year", yearOfStudy: 4.
-      // So batch = "Batch of " + (2000 + parseInt(admissionYY) + 4) or similar? 
-      // The prompt says: "label: 'Final Year' | '3rd Year'"
       batch = config.label;
     } else {
       status = 'pending_batch_review';
@@ -80,6 +76,10 @@ router.put('/profile', async (req, res) => {
       profilePictureUrl: profilePictureUrl || null,
       profileComplete: true,
     };
+    
+    if (privacySettings) {
+      updateData.privacySettings = privacySettings;
+    }
     
     if (flagForHodReview) {
       updateData.flagForHodReview = true;

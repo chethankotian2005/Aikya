@@ -11,18 +11,16 @@ _EventDoc _$EventDocFromJson(Map<String, dynamic> json) => _EventDoc(
   title: json['title'] as String,
   description: json['description'] as String,
   venue: json['venue'] as String,
-  eventDate: const DateTimeConverter().fromJson(json['eventDate']),
+  eventDate: DateTime.parse(json['eventDate'] as String),
   endDate: const DateTimeConverter().fromJson(json['endDate']),
   maxCapacity: (json['maxCapacity'] as num).toInt(),
   currentRegistrations: (json['currentRegistrations'] as num?)?.toInt() ?? 0,
-  registrationDeadline: const DateTimeConverter().fromJson(
-    json['registrationDeadline'],
-  ),
+  registrationDeadline: DateTime.parse(json['registrationDeadline'] as String),
   customFormSchema: json['customFormSchema'] as Map<String, dynamic>?,
   tag: json['tag'] as String,
   bannerUrl: json['bannerUrl'] as String?,
   createdBy: json['createdBy'] as String,
-  createdAt: const DateTimeConverter().fromJson(json['createdAt']),
+  createdAt: DateTime.parse(json['createdAt'] as String),
 );
 
 Map<String, dynamic> _$EventDocToJson(_EventDoc instance) => <String, dynamic>{
@@ -30,24 +28,14 @@ Map<String, dynamic> _$EventDocToJson(_EventDoc instance) => <String, dynamic>{
   'title': instance.title,
   'description': instance.description,
   'venue': instance.venue,
-  'eventDate': const DateTimeConverter().toJson(instance.eventDate),
-  'endDate': _$JsonConverterToJson<dynamic, DateTime>(
-    instance.endDate,
-    const DateTimeConverter().toJson,
-  ),
+  'eventDate': instance.eventDate.toIso8601String(),
+  'endDate': const DateTimeConverter().toJson(instance.endDate),
   'maxCapacity': instance.maxCapacity,
   'currentRegistrations': instance.currentRegistrations,
-  'registrationDeadline': const DateTimeConverter().toJson(
-    instance.registrationDeadline,
-  ),
+  'registrationDeadline': instance.registrationDeadline.toIso8601String(),
   'customFormSchema': instance.customFormSchema,
   'tag': instance.tag,
   'bannerUrl': instance.bannerUrl,
   'createdBy': instance.createdBy,
-  'createdAt': const DateTimeConverter().toJson(instance.createdAt),
+  'createdAt': instance.createdAt.toIso8601String(),
 };
-
-Json? _$JsonConverterToJson<Json, Value>(
-  Value? value,
-  Json? Function(Value value) toJson,
-) => value == null ? null : toJson(value);

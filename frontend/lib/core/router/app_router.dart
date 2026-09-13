@@ -7,13 +7,19 @@ import '../../features/auth/presentation/login_view.dart';
 import '../../features/auth/presentation/signup_view.dart';
 import '../../features/auth/presentation/profile_setup_screen.dart';
 import '../../features/auth/presentation/profile_edit_screen.dart';
+import '../../features/auth/presentation/force_password_reset_screen.dart';
 import '../../services/firebase_service.dart';
 import '../../screens/home_screen.dart';
 import '../../screens/splash_screen.dart';
 import '../../screens/events_hub_screen.dart';
+import '../../screens/create_update_screen.dart';
 import '../../screens/projects_screen.dart';
+import '../../screens/project_detail_screen.dart';
 import '../../screens/alumni_directory_screen.dart';
+import '../../screens/public_profile_screen.dart';
 import '../../screens/profile_screen.dart';
+import '../../models/project_model.dart';
+import '../../screens/admin/admin_report_generator_view.dart';
 import 'router_guards.dart';
 
 class RouterNotifier extends ChangeNotifier {
@@ -69,16 +75,21 @@ final routerProvider = Provider<GoRouter>((ref) {
       
       final userDoc = userDocAsync.valueOrNull;
 
-      // ── Phase 4: No Firestore doc yet (first-time signup) ──
+      // ── Phase 4: Forced Password Reset ──
+      if (userDoc != null && userDoc.mustResetPassword) {
+        return path == '/force-password-reset' ? null : '/force-password-reset';
+      }
+
+      // ── Phase 5: No Firestore doc yet (first-time signup) ──
       // Treat as profile-incomplete — send to setup
       print("ROUTER DEBUG: userDoc is ${userDoc != null ? 'NOT null' : 'NULL'}, profileComplete is ${userDoc?.profileComplete}");
       if (userDoc == null || !userDoc.profileComplete) {
         return isSetup ? null : '/setup';
       }
 
-      // ── Phase 5: Profile complete — go to app ──
+      // ── Phase 6: Profile complete — go to app ──
       // If they're on a pre-auth screen, redirect to home
-      if (isLogin || isSplash || isSignup) return '/home';
+      if (isLogin || isSplash || isSignup || path == '/force-password-reset') return '/home';
       
       // If they're on setup but profile is done, go home
       if (isSetup) return '/home';
@@ -104,6 +115,10 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const ProfileSetupScreen(),
       ),
       GoRoute(
+        path: '/force-password-reset',
+        builder: (context, state) => const ForcePasswordResetScreen(),
+      ),
+      GoRoute(
         path: '/home',
         builder: (context, state) => const HomeScreen(),
       ),
@@ -114,6 +129,20 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/projects',
         builder: (context, state) => const ProjectsScreen(),
+      ),
+      GoRoute(
+        path: '/projects/detail/:id',
+        builder: (context, state) {
+          final project = state.extra as ProjectModel;
+          return ProjectDetailScreen(project: project);
+        },
+      ),
+      GoRoute(
+        path: '/directory/profile/:uid',
+        builder: (context, state) {
+          final uid = state.pathParameters['uid']!;
+          return PublicProfileScreen(uid: uid);
+        },
       ),
       GoRoute(
         path: '/alumni',
@@ -130,6 +159,17 @@ final routerProvider = Provider<GoRouter>((ref) {
         ],
       ),
       // Add other routes here...
+      GoRoute(
+        path: '/create_update',
+        builder: (context, state) => const CreateUpdateScreen(),
+      ),
+      GoRoute(
+        path: '/admin/report',
+        builder: (context, state) {
+          final eventId = state.extra as String?;
+          return AdminReportGeneratorView(eventId: eventId);
+        },
+      ),
       
       // Admin shell
       ShellRoute(
@@ -140,17 +180,17 @@ final routerProvider = Provider<GoRouter>((ref) {
         routes: [
           GoRoute(
             path: '/admin',
-            redirect: (context, state) => roleGuard(ref, ['hod', 'event_faculty', 'regular_faculty', 'assistant']),
+            redirect: (context, state) => roleGuard(ref, ['hod', 'coordinator', 'faculty', 'admin']),
             builder: (context, state) => const Scaffold(body: Center(child: Text('Admin Dashboard'))),
             routes: [
               GoRoute(
                 path: 'accreditation',
-                redirect: (context, state) => roleGuard(ref, ['hod']),
+                redirect: (context, state) => roleGuard(ref, ['hod', 'admin']),
                 builder: (context, state) => const Scaffold(body: Center(child: Text('Accreditation Compiler'))),
               ),
               GoRoute(
                 path: 'events',
-                redirect: (context, state) => roleGuard(ref, ['hod', 'event_faculty']),
+                redirect: (context, state) => roleGuard(ref, ['hod', 'coordinator', 'admin']),
                 builder: (context, state) => const Scaffold(body: Center(child: Text('Event Builder'))),
               ),
             ],

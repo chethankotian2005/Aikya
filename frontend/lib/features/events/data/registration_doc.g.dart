@@ -11,7 +11,7 @@ _RegistrationDoc _$RegistrationDocFromJson(Map<String, dynamic> json) =>
       eventId: json['eventId'] as String,
       studentUid: json['studentUid'] as String,
       formResponses: json['formResponses'] as Map<String, dynamic>,
-      registeredAt: const DateTimeConverter().fromJson(json['registeredAt']),
+      registeredAt: DateTime.parse(json['registeredAt'] as String),
     );
 
 Map<String, dynamic> _$RegistrationDocToJson(_RegistrationDoc instance) =>
@@ -19,5 +19,5 @@ Map<String, dynamic> _$RegistrationDocToJson(_RegistrationDoc instance) =>
       'eventId': instance.eventId,
       'studentUid': instance.studentUid,
       'formResponses': instance.formResponses,
-      'registeredAt': const DateTimeConverter().toJson(instance.registeredAt),
+      'registeredAt': instance.registeredAt.toIso8601String(),
     };

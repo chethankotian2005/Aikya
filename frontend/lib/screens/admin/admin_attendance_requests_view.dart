@@ -1,12 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:infinite_scroll_pagination/infinite_scroll_pagination.dart';
 
 import '../../core/theme/app_tokens.dart';
 import '../../features/admin/data/attendance_request_doc.dart';
 import '../../features/auth/data/user_doc.dart';
-import '../../features/events/data/event_doc.dart';
+import '../../models/firestore/event_doc.dart';
+import '../../services/render_api_service.dart';
+import '../../services/firebase_service.dart';
 
 class AttendanceRequestPresentationData {
   final AttendanceRequestDoc request;
@@ -20,14 +25,14 @@ class AttendanceRequestPresentationData {
   });
 }
 
-class AdminAttendanceRequestsView extends StatefulWidget {
+class AdminAttendanceRequestsView extends ConsumerStatefulWidget {
   const AdminAttendanceRequestsView({super.key});
 
   @override
-  State<AdminAttendanceRequestsView> createState() => _AdminAttendanceRequestsViewState();
+  ConsumerState<AdminAttendanceRequestsView> createState() => _AdminAttendanceRequestsViewState();
 }
 
-class _AdminAttendanceRequestsViewState extends State<AdminAttendanceRequestsView> {
+class _AdminAttendanceRequestsViewState extends ConsumerState<AdminAttendanceRequestsView> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   final PagingController<DocumentSnapshot?, AttendanceRequestPresentationData> _pagingController =
@@ -91,35 +96,64 @@ class _AdminAttendanceRequestsViewState extends State<AdminAttendanceRequestsVie
     }
   }
 
-  void _handleApprove(String id, String eventId) async {
+  void _handleApprove(String id, String eventId, String studentId, String eventTitle) async {
     try {
-      await _firestore
-          .collection('events')
-          .doc(eventId)
-          .collection('attendanceRequests')
-          .doc(id)
-          .update({'status': 'approved', 'updatedAt': FieldValue.serverTimestamp()});
+      final authUser = ref.read(authStateProvider).value;
+      if (authUser == null) throw Exception('No auth user');
+      final idToken = await authUser.getIdToken();
+
+      final response = await http.post(
+        Uri.parse('${RenderApiService.baseUrl}/messaging/attendance/approve'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $idToken',
+        },
+        body: jsonEncode({
+          'requestId': id,
+          'eventId': eventId,
+          'studentId': studentId,
+          'eventTitle': eventTitle,
+        }),
+      );
+
+      if (response.statusCode != 200) {
+        throw Exception('Failed to approve attendance');
+      }
       _pagingController.refresh();
     } catch (e) {
       // Show error
+      print(e);
     }
   }
 
-  void _handleReject(String id, String eventId, String note) async {
+  void _handleReject(String id, String eventId, String studentId, String eventTitle, String note) async {
     try {
-      await _firestore
-          .collection('events')
-          .doc(eventId)
-          .collection('attendanceRequests')
-          .doc(id)
-          .update({
-        'status': 'rejected',
-        'reviewNotes': note,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+      final authUser = ref.read(authStateProvider).value;
+      if (authUser == null) throw Exception('No auth user');
+      final idToken = await authUser.getIdToken();
+
+      final response = await http.post(
+        Uri.parse('${RenderApiService.baseUrl}/messaging/attendance/reject'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $idToken',
+        },
+        body: jsonEncode({
+          'requestId': id,
+          'eventId': eventId,
+          'studentId': studentId,
+          'eventTitle': eventTitle,
+          'note': note,
+        }),
+      );
+
+      if (response.statusCode != 200) {
+        throw Exception('Failed to reject attendance');
+      }
       _pagingController.refresh();
     } catch (e) {
       // Show error
+      print(e);
     }
   }
 
@@ -166,8 +200,8 @@ class _AdminAttendanceRequestsViewState extends State<AdminAttendanceRequestsVie
                 itemBuilder: (context, data, index) {
                   return _RequestCard(
                     data: data,
-                    onApprove: () => _handleApprove(data.request.id, data.request.eventId),
-                    onReject: (note) => _handleReject(data.request.id, data.request.eventId, note),
+                    onApprove: () => _handleApprove(data.request.id, data.request.eventId, data.request.userId, data.event?.eventTitle ?? 'Event'),
+                    onReject: (note) => _handleReject(data.request.id, data.request.eventId, data.request.userId, data.event?.eventTitle ?? 'Event', note),
                   );
                 },
                 noItemsFoundIndicatorBuilder: (_) => Center(

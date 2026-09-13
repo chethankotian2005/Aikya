@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:go_router/go_router.dart';
 import '../../core/theme/app_tokens.dart';
+import '../../services/firebase_service.dart';
+import '../../features/auth/data/user_doc.dart';
 import 'admin_dashboard_view.dart';
 import 'admin_manage_events_view.dart';
 import 'admin_report_generator_view.dart';
@@ -11,19 +15,16 @@ import 'admin_analytics_view.dart';
 import 'admin_batch_config_view.dart';
 
 /// The main host shell for Faculty and Admin users.
-class AdminShellScreen extends StatefulWidget {
-  final String roleName;
-
+class AdminShellScreen extends ConsumerStatefulWidget {
   const AdminShellScreen({
     super.key,
-    this.roleName = 'HOD', // e.g., HOD, Event Faculty, Admin
   });
 
   @override
-  State<AdminShellScreen> createState() => _AdminShellScreenState();
+  ConsumerState<AdminShellScreen> createState() => _AdminShellScreenState();
 }
 
-class _AdminShellScreenState extends State<AdminShellScreen> {
+class _AdminShellScreenState extends ConsumerState<AdminShellScreen> {
   int _selectedIndex = 0;
 
   final List<String> _titles = [
@@ -39,16 +40,22 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final user = ref.watch(currentUserDocProvider).value;
+    final role = user?.role;
+
     return Scaffold(
       backgroundColor: AppColors.primarySurface,
-      drawer: _buildDrawer(),
-      appBar: _buildAppBar(),
-      body: _buildBody(),
+      drawer: _buildDrawer(role),
+      appBar: _buildAppBar(role),
+      body: _buildBody(role),
     );
   }
 
   // ─── App Bar ──────────────────────────────────────────────────────
-  PreferredSizeWidget _buildAppBar() {
+  PreferredSizeWidget _buildAppBar(UserRole? role) {
+    String roleName = role?.name ?? 'Loading...';
+    if (role == UserRole.hod) roleName = 'HOD';
+
     return AppBar(
       backgroundColor: AppColors.primarySurface,
       elevation: 0,
@@ -80,7 +87,7 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
                 const Icon(Icons.admin_panel_settings_rounded, size: 14, color: AppColors.accent),
                 const SizedBox(width: 6),
                 Text(
-                  widget.roleName.toUpperCase(),
+                  roleName.toUpperCase(),
                   style: GoogleFonts.poppins(
                     fontSize: 10,
                     fontWeight: FontWeight.w700,
@@ -98,7 +105,7 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
   }
 
   // ─── Drawer ───────────────────────────────────────────────────────
-  Widget _buildDrawer() {
+  Widget _buildDrawer(UserRole? role) {
     return Drawer(
       backgroundColor: AppColors.surfaceElevated,
       shape: const RoundedRectangleBorder(
@@ -153,13 +160,20 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 children: [
                   _drawerItem(0, Icons.dashboard_outlined, 'Dashboard'),
-                  _drawerItem(1, Icons.event_outlined, 'Events'),
-                  _drawerItem(2, Icons.summarize_outlined, 'Report Generator'),
-                  _drawerItem(3, Icons.verified_outlined, 'Accreditation Compiler'),
-                  _drawerItem(4, Icons.shield_outlined, 'Moderation'),
-                  _drawerItem(5, Icons.fact_check_outlined, 'Attendance Requests'),
-                  _drawerItem(6, Icons.insights_outlined, 'Analytics'),
-                  if (widget.roleName == 'HOD') _drawerItem(7, Icons.settings_applications_outlined, 'Batch Config'),
+                  if (role == UserRole.hod || role == UserRole.coordinator) 
+                    _drawerItem(1, Icons.event_outlined, 'Events'),
+                  if (role == UserRole.hod || role == UserRole.coordinator) 
+                    _drawerItem(2, Icons.summarize_outlined, 'Report Generator'),
+                  if (role == UserRole.hod) 
+                    _drawerItem(3, Icons.verified_outlined, 'Accreditation Compiler'),
+                  if (role == UserRole.hod) 
+                    _drawerItem(4, Icons.shield_outlined, 'Moderation'),
+                  if (role == UserRole.hod) 
+                    _drawerItem(5, Icons.fact_check_outlined, 'Attendance Requests'),
+                  if (role == UserRole.hod) 
+                    _drawerItem(6, Icons.insights_outlined, 'Analytics'),
+                  if (role == UserRole.hod) 
+                    _drawerItem(7, Icons.settings_applications_outlined, 'Batch Config'),
                 ],
               ),
             ),
@@ -220,25 +234,31 @@ class _AdminShellScreenState extends State<AdminShellScreen> {
   }
 
   // ─── Dynamic Body ─────────────────────────────────────────────────
-  Widget _buildBody() {
+  Widget _buildBody(UserRole? role) {
     // Switch between views based on _selectedIndex
     switch (_selectedIndex) {
       case 0:
         return const AdminDashboardView();
       case 1:
-        return const AdminManageEventsView();
+        if (role == UserRole.hod || role == UserRole.coordinator) return const AdminManageEventsView();
+        return const Center(child: Text('Unauthorized'));
       case 2:
-        return const AdminReportGeneratorView();
+        if (role == UserRole.hod || role == UserRole.coordinator) return const AdminReportGeneratorView();
+        return const Center(child: Text('Unauthorized'));
       case 3:
-        return const AdminAccreditationCompilerView();
+        if (role == UserRole.hod) return const AdminAccreditationCompilerView();
+        return const Center(child: Text('Unauthorized'));
       case 4:
-        return const AdminModerationQueueView();
+        if (role == UserRole.hod) return const AdminModerationQueueView();
+        return const Center(child: Text('Unauthorized'));
       case 5:
-        return const AdminAttendanceRequestsView();
+        if (role == UserRole.hod) return const AdminAttendanceRequestsView();
+        return const Center(child: Text('Unauthorized'));
       case 6:
-        return const AdminAnalyticsView();
+        if (role == UserRole.hod) return const AdminAnalyticsView();
+        return const Center(child: Text('Unauthorized'));
       case 7:
-        if (widget.roleName == 'HOD') return const AdminBatchConfigView();
+        if (role == UserRole.hod) return const AdminBatchConfigView();
         return const Center(child: Text('Unauthorized'));
       default:
         return Center(
