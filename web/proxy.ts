@@ -5,8 +5,9 @@ export function proxy(request: NextRequest) {
   const session = request.cookies.get('session');
   
   // Public paths that don't require authentication
-  const isPublicPath = request.nextUrl.pathname.startsWith('/login') || 
-                       request.nextUrl.pathname.startsWith('/api/') || 
+  const isPublicPath = request.nextUrl.pathname.startsWith('/login') ||
+                       request.nextUrl.pathname.startsWith('/signup') ||
+                       request.nextUrl.pathname.startsWith('/api/') ||
                        request.nextUrl.pathname.startsWith('/_next') ||
                        request.nextUrl.pathname.match(/\.(.*)$/); // static files
 
@@ -14,7 +15,7 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL('/login', request.url));
   }
 
-  if (session && request.nextUrl.pathname.startsWith('/login')) {
+  if (session && (request.nextUrl.pathname.startsWith('/login') || request.nextUrl.pathname.startsWith('/signup'))) {
     return NextResponse.redirect(new URL('/', request.url));
   }
 

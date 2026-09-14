@@ -12,9 +12,16 @@ try {
     if (parsed.startsWith('"') && parsed.endsWith('"')) {
       parsed = parsed.slice(1, -1).replace(/\\"/g, '"');
     }
-    // Fix unescaped newlines inside the private_key if Vercel mangled them
-    parsed = parsed.replace(/\n/g, '\\n');
-    const json = JSON.parse(parsed);
+    let json;
+    try {
+      // Normal case: valid JSON (e.g. pretty-printed with real newlines
+      // between properties, and a properly escaped \n inside private_key).
+      json = JSON.parse(parsed);
+    } catch {
+      // Fallback: some paste flows leave raw newlines inside the
+      // private_key value itself, which breaks JSON string escaping.
+      json = JSON.parse(parsed.replace(/\n/g, '\\n'));
+    }
     credential = cert(json);
   } else if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_CLIENT_EMAIL) {
     credential = cert({
