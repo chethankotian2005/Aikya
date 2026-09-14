@@ -1,20 +1,20 @@
 import BottomNav from "@/components/BottomNav";
+import { AuthProvider } from "@/lib/auth-context";
+import { requireUser } from "@/lib/firebase/session";
 
-export default function AppLayout({
+export default async function AppLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  await requireUser();
+
   return (
-    <div className="flex flex-col min-h-screen bg-primary-surface pb-16">
-      {/* 
-        The pb-16 is to ensure content isn't hidden behind the fixed BottomNav.
-        We can also use pb-20 to be safe with safe areas.
-      */}
-      <main className="flex-1 pb-20">
-        {children}
-      </main>
-      <BottomNav />
-    </div>
+    <AuthProvider>
+      <div className="flex min-h-screen flex-col bg-primary-surface">
+        <div className="mx-auto w-full max-w-3xl flex-1 pb-24">{children}</div>
+        <BottomNav />
+      </div>
+    </AuthProvider>
   );
 }

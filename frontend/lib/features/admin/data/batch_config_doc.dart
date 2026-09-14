@@ -4,7 +4,7 @@ part 'batch_config_doc.freezed.dart';
 part 'batch_config_doc.g.dart';
 
 @freezed
-class BatchConfigDoc with _$BatchConfigDoc {
+abstract class BatchConfigDoc with _$BatchConfigDoc {
   const factory BatchConfigDoc({
     @Default(1) int yearOfStudy,
     @Default('') String label,

@@ -1,92 +1,98 @@
 "use client";
 
-import { useState } from "react";
-import Image from "next/image";
-import Link from "next/link";
-import { ArrowLeft, Search, X, Calendar as CalendarIcon, MapPin, Users, CheckCircle } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Timestamp, collection, collectionGroup, doc, getDoc, getDocs, limit, orderBy, query, where,
+} from "firebase/firestore";
+import { CalendarX, Search, X } from "lucide-react";
+import { db } from "@/lib/firebase/firebase";
+import { useAuth } from "@/lib/auth-context";
+import { friendlyError } from "@/lib/errors";
+import { useLiveQuery } from "@/lib/hooks";
+import { toEvent, type EventItem } from "@/lib/models";
+import { EmptyState, PageHeader, PageSpinner } from "@/components/ui";
+import { EventCard } from "@/components/EventCard";
+
+type Segment = "upcoming" | "past" | "mine";
 
 export default function EventsHub() {
-  const [selectedSegment, setSelectedSegment] = useState<0 | 1 | 2>(0);
-  const [searchQuery, setSearchQuery] = useState("");
+  const { profile } = useAuth();
+  const isStudent = profile?.role === "student";
+  const [segment, setSegment] = useState<Segment>("upcoming");
+  const [search, setSearch] = useState("");
+  const [pageSize, setPageSize] = useState(20);
+  const [mine, setMine] = useState<{ events: EventItem[]; loading: boolean; error: string }>({
+    events: [],
+    loading: true,
+    error: "",
+  });
 
-  const segments = ["Upcoming", "Past", "My Registrations"];
+  const events = useLiveQuery(
+    () => {
+      if (segment === "mine") return null;
+      const now = Timestamp.now();
+      return segment === "upcoming"
+        ? query(collection(db, "events"), where("eventDate", ">=", now), orderBy("eventDate"), limit(pageSize))
+        : query(collection(db, "events"), where("eventDate", "<", now), orderBy("eventDate", "desc"), limit(pageSize));
+    },
+    toEvent,
+    [segment, pageSize],
+  );
 
-  // Dummy data
-  const events = [
-    {
-      id: "ev1",
-      title: "Neural Hack 2026 — 24hr AI Build Sprint",
-      tag: "Hackathon",
-      date: "Sep 15 · 9:00 AM – Sep 16",
-      venue: "Main Auditorium, Block C",
-      image: "/assets/images/event_hackathon.jpg",
-      day: "15",
-      month: "SEP",
-      filledSeats: 42,
-      totalSeats: 50,
-      isRegistered: true,
-      isPast: false
-    },
-    {
-      id: "ev2",
-      title: "Hands-on: Fine-tuning LLMs with LoRA",
-      tag: "Workshop",
-      date: "Sep 22 · 2:00 PM – 5:00 PM",
-      venue: "Lab 3, Dept of AI & ML",
-      image: "/assets/images/event_workshop.jpg",
-      day: "22",
-      month: "SEP",
-      filledSeats: 28,
-      totalSeats: 40,
-      isRegistered: false,
-      isPast: false
-    },
-    {
-      id: "ev3",
-      title: "Vision Transformers in Medical Imaging",
-      tag: "Seminar",
-      date: "Sep 29 · 10:30 AM – 12:00 PM",
-      venue: "Seminar Hall 2",
-      image: "/assets/images/event_seminar.jpg",
-      day: "29",
-      month: "SEP",
-      filledSeats: 15,
-      totalSeats: 60,
-      isRegistered: false,
-      isPast: false
-    }
+  useEffect(() => {
+    if (!profile || !isStudent) return;
+    (async () => {
+      try {
+        const regs = await getDocs(
+          query(collectionGroup(db, "registrations"), where("studentUid", "==", profile.uid), orderBy("registeredAt", "desc")),
+        );
+        const snaps = await Promise.all(
+          regs.docs.map((r) => getDoc(doc(db, "events", (r.data().eventId as string) ?? r.ref.parent.parent!.id))),
+        );
+        setMine({ events: snaps.filter((s) => s.exists()).map((s) => toEvent(s.id, s.data()!)), loading: false, error: "" });
+      } catch (err) {
+        setMine({ events: [], loading: false, error: friendlyError(err) });
+      }
+    })();
+  }, [profile, isStudent]);
+
+  const registeredIds = useMemo(() => new Set(mine.events.map((e) => e.id)), [mine.events]);
+  const source = segment === "mine" ? mine.events : events.data;
+  const loading = segment === "mine" ? mine.loading : events.loading;
+  const error = segment === "mine" ? mine.error : events.error;
+
+  const q = search.trim().toLowerCase();
+  const visible = q
+    ? source.filter((e) => [e.title, e.tag, e.venue].some((v) => v.toLowerCase().includes(q)))
+    : source;
+
+  const segments: { id: Segment; label: string }[] = [
+    { id: "upcoming", label: "Upcoming" },
+    { id: "past", label: "Past" },
+    ...(isStudent ? [{ id: "mine" as const, label: "My Registrations" }] : []),
   ];
 
   return (
-    <div className="flex flex-col min-h-screen bg-primary-surface">
-      {/* ─── App Bar ─── */}
-      <header className="px-5 pt-5 flex items-center gap-4">
-        <Link 
-          href="/" 
-          className="w-10 h-10 rounded-lg bg-surface-elevated border border-border flex items-center justify-center text-text-secondary hover:bg-primary-container transition"
-        >
-          <ArrowLeft size={20} />
-        </Link>
-        <h1 className="text-xl font-bold text-text-primary tracking-tight">Events Hub</h1>
-      </header>
+    <div className="flex flex-col">
+      <PageHeader title="Events Hub" />
 
-      {/* ─── Search Bar ─── */}
-      <div className="px-5 pt-4">
+      <div className="px-5 pt-3">
         <div className="relative">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <Search size={18} className="text-text-tertiary" />
-          </div>
+          <Search size={18} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-text-tertiary" aria-hidden />
           <input
-            type="text"
-            className="w-full h-11 pl-10 pr-10 bg-surface-elevated border border-border rounded-lg text-[13px] text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent"
+            type="search"
+            aria-label="Search events"
+            className="input pl-10"
             placeholder="Search events..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
           />
-          {searchQuery && (
-            <button 
-              className="absolute inset-y-0 right-0 pr-3 flex items-center text-text-tertiary hover:text-text-primary"
-              onClick={() => setSearchQuery("")}
+          {search && (
+            <button
+              type="button"
+              aria-label="Clear search"
+              onClick={() => setSearch("")}
+              className="absolute top-1/2 right-3 -translate-y-1/2 text-text-tertiary hover:text-text-primary"
             >
               <X size={16} />
             </button>
@@ -94,116 +100,48 @@ export default function EventsHub() {
         </div>
       </div>
 
-      {/* ─── Segmented Control ─── */}
       <div className="px-5 pt-4 pb-2">
-        <div className="flex p-1 bg-primary-container rounded-lg">
-          {segments.map((label, i) => (
+        <div role="tablist" className="flex rounded-full bg-primary-container p-1">
+          {segments.map((s) => (
             <button
-              key={i}
-              onClick={() => setSelectedSegment(i as 0 | 1 | 2)}
-              className={`flex-1 py-2 text-xs font-semibold rounded-md transition-all duration-200 ${
-                selectedSegment === i 
-                  ? "bg-surface-elevated text-text-primary shadow-sm" 
-                  : "text-text-tertiary hover:text-text-secondary"
+              key={s.id}
+              role="tab"
+              aria-selected={segment === s.id}
+              onClick={() => setSegment(s.id)}
+              className={`flex-1 rounded-full py-2 text-xs font-semibold transition-all ${
+                segment === s.id ? "bg-surface-elevated text-text-primary shadow-sm" : "text-text-tertiary hover:text-text-secondary"
               }`}
             >
-              {label}
+              {s.label}
             </button>
           ))}
         </div>
       </div>
 
-      {/* ─── Event List ─── */}
-      <div className="px-5 pt-2 pb-12 flex flex-col gap-4">
-        {events.map((event) => (
-          <EventCard key={event.id} event={event} />
-        ))}
+      <div className="flex flex-col gap-4 px-5 pt-2 pb-6">
+        {loading ? (
+          <PageSpinner />
+        ) : visible.length === 0 ? (
+          <EmptyState
+            icon={CalendarX}
+            message={
+              error ||
+              (segment === "mine"
+                ? "You haven't registered for any events yet."
+                : q
+                  ? `No events match "${search}".`
+                  : "No events here yet.")
+            }
+          />
+        ) : (
+          visible.map((e) => <EventCard key={e.id} event={e} registered={registeredIds.has(e.id)} />)
+        )}
+        {segment !== "mine" && events.data.length === pageSize && (
+          <button type="button" className="btn-outline self-center" onClick={() => setPageSize((n) => n + 20)}>
+            Load more
+          </button>
+        )}
       </div>
     </div>
-  );
-}
-
-function EventCard({ event }: { event: any }) {
-  const getTagStyle = (tag: string) => {
-    const t = tag.toLowerCase();
-    if (t.includes('hackathon')) return { bg: 'bg-primary/10', color: 'text-primary' };
-    if (t.includes('workshop')) return { bg: 'bg-success/10', color: 'text-success' };
-    return { bg: 'bg-accent/10', color: 'text-accent' };
-  };
-
-  const tagStyle = getTagStyle(event.tag);
-  const ratio = event.filledSeats / event.totalSeats;
-  const isFull = event.filledSeats >= event.totalSeats;
-  const isNear = ratio >= 0.8;
-  const barColor = isFull ? 'bg-error' : isNear ? 'bg-warning' : 'bg-accent';
-  const barBg = isFull ? 'bg-error/15' : isNear ? 'bg-warning/15' : 'bg-accent/15';
-  const seatColorText = isFull ? 'text-error' : isNear ? 'text-warning' : 'text-accent';
-
-  return (
-    <Link href={`/events/${event.id}`} className="block">
-      <div className="rounded-xl bg-surface-elevated border border-border shadow-sm overflow-hidden hover:border-accent/50 transition">
-        {/* Banner */}
-        <div className="h-[140px] relative w-full">
-          <Image src={event.image} alt={event.title} fill className="object-cover" />
-          <div className="absolute inset-0 bg-gradient-to-t from-primary/50 to-transparent" />
-          
-          <div className="absolute top-2.5 left-2.5 bg-surface-elevated rounded flex flex-col items-center justify-center px-2 py-1 shadow-sm min-w-[36px]">
-            <span className="text-base font-extrabold text-text-primary leading-[1.1]">{event.day}</span>
-            <span className="text-[9px] font-semibold text-accent tracking-widest">{event.month}</span>
-          </div>
-          
-          {event.isPast && (
-            <div className="absolute top-2.5 right-2.5 bg-primary/80 rounded-full px-2.5 py-1">
-              <span className="text-[10px] font-semibold text-white/70 tracking-wide">PAST</span>
-            </div>
-          )}
-          
-          {event.isRegistered && !event.isPast && (
-            <div className="absolute top-2.5 right-2.5 bg-success/90 rounded-full px-2.5 py-1 flex items-center gap-1">
-              <CheckCircle size={12} className="text-white" />
-              <span className="text-[10px] font-semibold text-white tracking-wide">REGISTERED</span>
-            </div>
-          )}
-        </div>
-        
-        {/* Content */}
-        <div className="p-4">
-          <div className={`inline-flex px-2 py-0.5 rounded text-[10px] font-semibold tracking-wide uppercase ${tagStyle.bg} ${tagStyle.color}`}>
-            {event.tag}
-          </div>
-          
-          <h3 className="text-[15px] font-bold text-text-primary leading-snug line-clamp-2 mt-2">
-            {event.title}
-          </h3>
-          
-          <div className="flex items-center gap-2 text-text-tertiary mt-2.5">
-            <CalendarIcon size={14} />
-            <span className="text-xs">{event.date}</span>
-          </div>
-          <div className="flex items-center gap-2 text-text-tertiary mt-1.5">
-            <MapPin size={14} />
-            <span className="text-xs truncate">{event.venue}</span>
-          </div>
-          
-          {/* Progress */}
-          <div className="mt-3">
-            <div className="flex justify-between items-center mb-1.5">
-              <div className={`flex items-center gap-1 ${seatColorText}`}>
-                <Users size={14} />
-                <span className="text-xs font-semibold">{event.filledSeats}/{event.totalSeats} seats</span>
-              </div>
-              {isFull && <span className="text-[10px] font-bold text-error uppercase">Sold Out</span>}
-              {isNear && !isFull && <span className="text-[10px] font-bold text-warning uppercase">Filling Fast</span>}
-            </div>
-            <div className={`h-1.5 w-full rounded-full ${barBg}`}>
-              <div 
-                className={`h-full rounded-full ${barColor}`} 
-                style={{ width: `${Math.min(ratio * 100, 100)}%` }}
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-    </Link>
   );
 }

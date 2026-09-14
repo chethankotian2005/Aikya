@@ -1,0 +1,45 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isImage() {
+      return request.resource.contentType.matches('image/.*');
+    }
+
+    function underMb(mb) {
+      return request.resource.size < mb * 1024 * 1024;
+    }
+
+    match /profile_pictures/{fileName} {
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && fileName.matches(request.auth.uid + '[.].*')
+        && isImage()
+        && underMb(5);
+      allow delete: if signedIn() && fileName.matches(request.auth.uid + '[.].*');
+    }
+
+    // Per-user upload folders: memory frames, project screenshots, event banners,
+    // report photos, update images.
+    match /{folder}/{uid}/{fileName} {
+      allow read: if signedIn()
+        && folder in ['memoryFrames', 'projects', 'events', 'reportPhotos', 'updates'];
+      allow create, update: if signedIn()
+        && request.auth.uid == uid
+        && folder in ['memoryFrames', 'projects', 'events', 'reportPhotos', 'updates']
+        && isImage()
+        && underMb(10);
+      allow delete: if signedIn() && request.auth.uid == uid;
+    }
+
+    // Compiled PDFs are written by the backend (Admin SDK bypasses these rules).
+    match /accreditation-reports/{fileName} {
+      allow read: if signedIn();
+    }
+  }
+}

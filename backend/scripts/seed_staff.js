@@ -55,10 +55,6 @@ async function seedStaff() {
         }
       }
 
-      const claims = { role };
-      if (club) claims.club = club;
-      await admin.auth().setCustomUserClaims(userRecord.uid, claims);
-
       const userDoc = {
         uid: userRecord.uid,
         email: email,

@@ -1,295 +1,386 @@
-import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'dart:typed_data';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:infinite_scroll_pagination/infinite_scroll_pagination.dart';
-import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../core/theme/app_tokens.dart';
-import '../features/memories/data/memory_frame_doc.dart';
+import '../models/firestore/memory_frame_doc.dart';
+import '../services/firebase_service.dart';
+import '../utils/friendly_error.dart';
+import '../utils/image_upload.dart';
+import '../widgets/shared_widgets.dart';
 
-class MemoryWallScreen extends StatefulWidget {
+final approvedFramesProvider = StreamProvider.autoDispose<List<MemoryFrameDoc>>((ref) {
+  return MemoryFrameDoc.collection
+      .where('status', isEqualTo: FrameStatus.approved.name)
+      .orderBy('createdAt', descending: true)
+      .limit(60)
+      .snapshots()
+      .map((snap) => snap.docs.map(MemoryFrameDoc.fromFirestore).toList());
+});
+
+/// The caller's own uploads that are still pending or were rejected.
+final myUnapprovedFramesProvider = StreamProvider.autoDispose<List<MemoryFrameDoc>>((ref) {
+  final uid = FirebaseAuth.instance.currentUser?.uid;
+  if (uid == null) return Stream.value(const []);
+  return MemoryFrameDoc.collection
+      .where('uploadedBy', isEqualTo: uid)
+      .orderBy('createdAt', descending: true)
+      .limit(30)
+      .snapshots()
+      .map((snap) => snap.docs
+          .map(MemoryFrameDoc.fromFirestore)
+          .where((f) => f.status != FrameStatus.approved)
+          .toList());
+});
+
+class MemoryWallScreen extends ConsumerWidget {
   const MemoryWallScreen({super.key});
 
   @override
-  State<MemoryWallScreen> createState() => _MemoryWallScreenState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final approved = ref.watch(approvedFramesProvider);
+    final mine = ref.watch(myUnapprovedFramesProvider).valueOrNull ?? const [];
 
-class _MemoryWallScreenState extends State<MemoryWallScreen> {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final String? _uid = FirebaseAuth.instance.currentUser?.uid;
-
-  final PagingController<DocumentSnapshot?, MemoryFrameDoc> _pagingController =
-      PagingController(firstPageKey: null);
-
-  @override
-  void initState() {
-    super.initState();
-    _pagingController.addPageRequestListener((pageKey) {
-      _fetchPage(pageKey);
-    });
-  }
-
-  Future<void> _fetchPage(DocumentSnapshot? pageKey) async {
-    try {
-      const pageSize = 15;
-      Query query = _firestore
-          .collection('memories')
-          .orderBy('createdAt', descending: true)
-          .limit(pageSize);
-
-      if (pageKey != null) {
-        query = query.startAfterDocument(pageKey);
-      }
-
-      final snap = await query.get();
-      final isLastPage = snap.docs.length < pageSize;
-      
-      final newItems = snap.docs.map((doc) {
-        return MemoryFrameDoc.fromJson({'id': doc.id, ...doc.data() as Map<String, dynamic>});
-      }).toList();
-
-      if (isLastPage) {
-        _pagingController.appendLastPage(newItems);
-      } else {
-        _pagingController.appendPage(newItems, snap.docs.last);
-      }
-    } catch (error) {
-      _pagingController.error = error;
-    }
-  }
-
-  @override
-  void dispose() {
-    _pagingController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.primarySurface,
       body: SafeArea(
         bottom: false,
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildHeader(),
-            Expanded(child: _buildGallery()),
+            const ScreenHeader(title: 'Memory Wall'),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+              child: Text(
+                'Snapshots of our journey. Uploads appear after HOD approval.',
+                style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary),
+              ),
+            ),
+            Expanded(
+              child: approved.when(
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (e, _) => EmptyState(icon: Icons.error_outline, message: friendlyError(e)),
+                data: (frames) => CustomScrollView(
+                  slivers: [
+                    if (mine.isNotEmpty) SliverToBoxAdapter(child: _PendingStrip(frames: mine)),
+                    if (frames.isEmpty)
+                      const SliverFillRemaining(
+                        hasScrollBody: false,
+                        child: EmptyState(
+                          icon: Icons.photo_library_outlined,
+                          message: 'No memories yet — tap Contribute to share the first photo.',
+                        ),
+                      )
+                    else
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
+                        sliver: SliverMasonryGrid.count(
+                          crossAxisCount: 2,
+                          mainAxisSpacing: 12,
+                          crossAxisSpacing: 12,
+                          childCount: frames.length,
+                          itemBuilder: (context, i) => _FrameTile(
+                            frame: frames[i],
+                            tall: i % 3 == 0,
+                            onTap: () => _openFrame(context, frames, i),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
           ],
         ),
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {}, // Handled elsewhere or future enhancement
-        backgroundColor: AppColors.accent,
-        icon: const Icon(Icons.add_a_photo_outlined, color: Colors.white),
-        label: Text(
-          'Contribute',
-          style: GoogleFonts.poppins(
-            fontWeight: FontWeight.w600,
-            color: Colors.white,
+        onPressed: () => showModalBottomSheet(
+          context: context,
+          isScrollControlled: true,
+          showDragHandle: true,
+          builder: (_) => const _UploadSheet(),
+        ),
+        backgroundColor: AppColors.secondary,
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.add_a_photo_outlined),
+        label: Text('Contribute', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+      ),
+    );
+  }
+
+  void _openFrame(BuildContext context, List<MemoryFrameDoc> frames, int index) {
+    final frame = frames[index];
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => frame.reportMarkdown != null
+          ? _ReportReaderScreen(frame: frame)
+          : _LightboxScreen(frames: frames, initialIndex: index),
+    ));
+  }
+}
+
+class _FrameTile extends StatelessWidget {
+  final MemoryFrameDoc frame;
+  final bool tall;
+  final VoidCallback onTap;
+
+  const _FrameTile({required this.frame, required this.tall, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: ClipRRect(
+        borderRadius: AppRadius.borderRadiusLg,
+        child: AspectRatio(
+          aspectRatio: tall ? 3 / 4 : 1,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Image.network(
+                frame.imageUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Container(
+                  color: AppColors.primaryContainer,
+                  child: const Icon(Icons.broken_image_outlined, color: AppColors.textTertiary),
+                ),
+              ),
+              if (frame.reportMarkdown != null)
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: const BoxDecoration(color: AppColors.accent, shape: BoxShape.circle),
+                    child: const Icon(Icons.article_rounded, size: 14, color: Colors.white),
+                  ),
+                ),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(10, 24, 10, 8),
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.bottomCenter,
+                      end: Alignment.topCenter,
+                      colors: [Colors.black87, Colors.transparent],
+                    ),
+                  ),
+                  child: Text(
+                    frame.uploaderName,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
+}
 
-  Widget _buildHeader() {
+class _PendingStrip extends StatelessWidget {
+  final List<MemoryFrameDoc> frames;
+  const _PendingStrip({required this.frames});
+
+  @override
+  Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Memory Wall',
-                  style: GoogleFonts.poppins(
-                    fontSize: 28,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.textPrimary,
-                    letterSpacing: -0.5,
-                  ),
-                ),
-                Text(
-                  'Snapshots of our journey.',
-                  style: GoogleFonts.poppins(
-                    fontSize: 14,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-              ],
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+            child: Text(
+              'Your uploads awaiting review',
+              style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w700),
             ),
           ),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppColors.primaryContainer,
-              shape: BoxShape.circle,
+          SizedBox(
+            height: 96,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              itemCount: frames.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (_, i) {
+                final frame = frames[i];
+                final rejected = frame.status == FrameStatus.rejected;
+                return ClipRRect(
+                  borderRadius: AppRadius.borderRadiusMd,
+                  child: SizedBox(
+                    width: 96,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Image.network(frame.imageUrl, fit: BoxFit.cover),
+                        Positioned(
+                          left: 4,
+                          bottom: 4,
+                          child: TagChip(
+                            label: rejected ? 'Rejected' : 'Pending',
+                            color: rejected ? AppColors.error : AppColors.warning,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
             ),
-            child: const Icon(Icons.filter_list_rounded, color: AppColors.primary),
           ),
         ],
       ),
     );
   }
+}
 
-  Widget _buildGallery() {
-    return PagedGridView<DocumentSnapshot?, MemoryFrameDoc>(
-      pagingController: _pagingController,
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        mainAxisSpacing: 12,
-        crossAxisSpacing: 12,
-        childAspectRatio: 0.8,
-      ),
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
-      builderDelegate: PagedChildBuilderDelegate<MemoryFrameDoc>(
-        itemBuilder: (context, photo, index) {
-          // Height variation for masonry effect based on hash of id
-          final isTall = photo.id.hashCode % 2 == 0;
-          return GestureDetector(
-            onTap: () => _openLightbox(context, index),
-            child: Hero(
-              tag: 'photo_${photo.id}',
-              child: Container(
-                height: isTall ? 220 : 160,
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceElevated,
-                  borderRadius: AppRadius.borderRadiusLg,
-                  boxShadow: AppShadows.sm,
-                  image: DecorationImage(
-                    image: (photo.imageUrl.startsWith('http')
-                        ? NetworkImage(photo.imageUrl)
-                        : AssetImage(photo.imageUrl)) as ImageProvider,
-                    fit: BoxFit.cover,
-                  ),
-                ),
-                child: Stack(
-                  children: [
-                    if (photo.reportMarkdown != null)
-                      Positioned(
-                        top: 8,
-                        right: 8,
-                        child: Container(
-                          padding: const EdgeInsets.all(6),
-                          decoration: BoxDecoration(
-                            color: AppColors.accent,
-                            shape: BoxShape.circle,
-                            boxShadow: AppShadows.sm,
-                          ),
-                          child: const Icon(Icons.article_rounded, size: 16, color: Colors.white),
-                        ),
-                      ),
-                    Positioned(
-                      bottom: 0,
-                      left: 0,
-                      right: 0,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.bottomCenter,
-                            end: Alignment.topCenter,
-                            colors: [Colors.black.withValues(alpha: 0.8), Colors.transparent],
-                          ),
-                          borderRadius: const BorderRadius.vertical(bottom: Radius.circular(AppRadius.lg)),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Flexible(
-                              child: Text(
-                                photo.uploadedBy,
-                                style: GoogleFonts.poppins(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.white,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            if (photo.status == FrameStatus.pending)
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: AppColors.warning.withValues(alpha: 0.9),
-                                  borderRadius: AppRadius.borderRadiusSm,
-                                ),
-                                child: Text(
-                                  'PENDING',
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 8,
-                                    fontWeight: FontWeight.w800,
-                                    color: AppColors.primary,
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        },
-        firstPageErrorIndicatorBuilder: (_) => const Center(child: Text('Error loading memories')),
-        noItemsFoundIndicatorBuilder: (_) => const Center(child: Text('No memories found.')),
-      ),
-    );
+class _UploadSheet extends ConsumerStatefulWidget {
+  const _UploadSheet();
+
+  @override
+  ConsumerState<_UploadSheet> createState() => _UploadSheetState();
+}
+
+class _UploadSheetState extends ConsumerState<_UploadSheet> {
+  final _captionController = TextEditingController();
+  final _eventController = TextEditingController();
+  XFile? _image;
+  Uint8List? _preview;
+  bool _uploading = false;
+
+  @override
+  void dispose() {
+    _captionController.dispose();
+    _eventController.dispose();
+    super.dispose();
   }
 
-  void _openLightbox(BuildContext context, int initialIndex) {
-    final photo = _pagingController.itemList![initialIndex];
-    if (photo.reportMarkdown != null) {
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (context) => _ReportReaderScreen(photo: photo),
-        ),
-      );
-      return;
-    }
+  Future<void> _pick() async {
+    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 80, maxWidth: 2000);
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
+    setState(() {
+      _image = picked;
+      _preview = bytes;
+    });
+  }
 
-    Navigator.of(context).push(
-      PageRouteBuilder(
-        opaque: false,
-        barrierColor: Colors.black,
-        pageBuilder: (context, _, __) => _LightboxScreen(
-          initialIndex: initialIndex,
-          photos: _pagingController.itemList ?? [],
-        ),
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          return FadeTransition(opacity: animation, child: child);
-        },
+  Future<void> _submit() async {
+    final image = _image;
+    final user = ref.read(currentUserDocProvider).valueOrNull;
+    if (image == null || user == null) return;
+
+    setState(() => _uploading = true);
+    try {
+      final url = await uploadImage(image, 'memoryFrames/${user.uid}/${uniqueImageName(image)}');
+      await MemoryFrameDoc.collection.add(MemoryFrameDoc.newFrame(
+        uploadedBy: user.uid,
+        uploaderName: user.fullName,
+        imageUrl: url,
+        caption: _captionController.text.trim(),
+        eventName: _eventController.text.trim(),
+      ));
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Submitted — it will appear once the HOD approves it.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _uploading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(friendlyError(e)), backgroundColor: AppColors.error),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(20, 0, 20, MediaQuery.of(context).viewInsets.bottom + 24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('Share a memory', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 16),
+          GestureDetector(
+            onTap: _uploading ? null : _pick,
+            child: Container(
+              height: 180,
+              decoration: BoxDecoration(
+                color: AppColors.primaryContainer,
+                borderRadius: AppRadius.borderRadiusLg,
+                border: Border.all(color: AppColors.border),
+                image: _preview != null
+                    ? DecorationImage(image: MemoryImage(_preview!), fit: BoxFit.cover)
+                    : null,
+              ),
+              child: _preview == null
+                  ? Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.add_photo_alternate_outlined, size: 40, color: AppColors.accent),
+                        const SizedBox(height: 8),
+                        Text('Tap to choose a photo', style: GoogleFonts.poppins(color: AppColors.textSecondary)),
+                      ],
+                    )
+                  : null,
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _captionController,
+            maxLength: 200,
+            decoration: const InputDecoration(labelText: 'Caption'),
+          ),
+          TextField(
+            controller: _eventController,
+            decoration: const InputDecoration(labelText: 'Event (optional)'),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: _image == null || _uploading ? null : _submit,
+            style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
+            child: _uploading
+                ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  )
+                : const Text('Submit for approval'),
+          ),
+        ],
       ),
     );
   }
 }
 
 class _LightboxScreen extends StatefulWidget {
+  final List<MemoryFrameDoc> frames;
   final int initialIndex;
-  final List<MemoryFrameDoc> photos;
 
-  const _LightboxScreen({required this.initialIndex, required this.photos});
+  const _LightboxScreen({required this.frames, required this.initialIndex});
 
   @override
   State<_LightboxScreen> createState() => _LightboxScreenState();
 }
 
 class _LightboxScreenState extends State<_LightboxScreen> {
-  late PageController _pageController;
-  late int _currentIndex;
-
-  @override
-  void initState() {
-    super.initState();
-    _currentIndex = widget.initialIndex;
-    _pageController = PageController(initialPage: _currentIndex);
-  }
+  late final PageController _pageController = PageController(initialPage: widget.initialIndex);
+  late int _index = widget.initialIndex;
+  final Set<String> _liked = {};
 
   @override
   void dispose() {
@@ -297,245 +388,109 @@ class _LightboxScreenState extends State<_LightboxScreen> {
     super.dispose();
   }
 
+  Future<void> _like(MemoryFrameDoc frame) async {
+    if (_liked.contains(frame.id)) return;
+    setState(() => _liked.add(frame.id));
+    try {
+      await MemoryFrameDoc.collection.doc(frame.id).update({'likesCount': FieldValue.increment(1)});
+    } catch (_) {
+      if (mounted) setState(() => _liked.remove(frame.id));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (widget.photos.isEmpty) return const SizedBox();
+    final frame = widget.frames[_index];
+    final likes = frame.likesCount + (_liked.contains(frame.id) ? 1 : 0);
 
     return Scaffold(
       backgroundColor: Colors.black,
-      body: Stack(
+      appBar: AppBar(backgroundColor: Colors.black, foregroundColor: Colors.white),
+      body: Column(
         children: [
-          PageView.builder(
-            controller: _pageController,
-            onPageChanged: (i) => setState(() => _currentIndex = i),
-            itemCount: widget.photos.length,
-            itemBuilder: (context, index) {
-              final photo = widget.photos[index];
-              return InteractiveViewer(
-                child: Hero(
-                  tag: 'photo_${photo.id}',
-                  child: photo.imageUrl.startsWith('http')
-                      ? Image.network(photo.imageUrl, fit: BoxFit.contain)
-                      : Image.asset(photo.imageUrl, fit: BoxFit.contain),
-                ),
-              );
-            },
-          ),
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 16,
-            right: 20,
-            child: GestureDetector(
-              onTap: () => Navigator.of(context).pop(),
-              child: Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.5),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.close_rounded, color: Colors.white, size: 24),
+          Expanded(
+            child: PageView.builder(
+              controller: _pageController,
+              itemCount: widget.frames.length,
+              onPageChanged: (i) => setState(() => _index = i),
+              itemBuilder: (_, i) => InteractiveViewer(
+                child: Image.network(widget.frames[i].imageUrl, fit: BoxFit.contain),
               ),
             ),
           ),
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: Container(
-              padding: EdgeInsets.fromLTRB(24, 64, 24, MediaQuery.of(context).padding.bottom + 24),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Colors.transparent, Colors.black.withValues(alpha: 0.9)],
-                  stops: const [0.0, 1.0],
-                ),
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    frame.uploaderName,
+                    style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.white),
+                  ),
+                  if (frame.caption.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(frame.caption, style: GoogleFonts.poppins(fontSize: 14, color: Colors.white70)),
+                  ],
+                  if (frame.eventName.isNotEmpty)
+                    Text(frame.eventName, style: GoogleFonts.poppins(fontSize: 12, color: AppColors.accent)),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      TextButton.icon(
+                        onPressed: () => _like(frame),
+                        style: TextButton.styleFrom(foregroundColor: AppColors.accent),
+                        icon: Icon(
+                          _liked.contains(frame.id) ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                        ),
+                        label: Text('$likes'),
+                      ),
+                      const Spacer(),
+                      Text(
+                        '${_index + 1} of ${widget.frames.length}',
+                        style: GoogleFonts.poppins(fontSize: 12, color: Colors.white54),
+                      ),
+                    ],
+                  ),
+                ],
               ),
-              child: _buildDetails(widget.photos[_currentIndex]),
             ),
           ),
         ],
       ),
     );
   }
-
-  Widget _buildDetails(MemoryFrameDoc photo) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 28,
-                  height: 28,
-                  decoration: const BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: AppColors.aiBadgeGradient,
-                  ),
-                  child: Center(
-                    child: Text(
-                      photo.uploadedBy.isNotEmpty ? photo.uploadedBy.substring(0, 1).toUpperCase() : 'A',
-                      style: GoogleFonts.poppins(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Text(
-                  photo.uploadedBy,
-                  style: GoogleFonts.poppins(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
-                  ),
-                ),
-              ],
-            ),
-            if (photo.status == FrameStatus.pending)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: AppColors.warning.withValues(alpha: 0.9),
-                  borderRadius: AppRadius.borderRadiusFull,
-                ),
-                child: Text(
-                  'PENDING APPROVAL',
-                  style: GoogleFonts.poppins(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.primary,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        Text(
-          photo.caption,
-          style: GoogleFonts.poppins(
-            fontSize: 15,
-            color: Colors.white.withValues(alpha: 0.9),
-            height: 1.4,
-          ),
-        ),
-        const SizedBox(height: 24),
-        Row(
-          children: [
-            _interactionButton(Icons.favorite_border_rounded, '${photo.likesCount} Likes', AppColors.accent),
-            const SizedBox(width: 24),
-            _interactionButton(Icons.share_outlined, 'Share', Colors.white),
-            const Spacer(),
-            Text(
-              '${_currentIndex + 1} of ${widget.photos.length}',
-              style: GoogleFonts.poppins(
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                color: Colors.white.withValues(alpha: 0.5),
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _interactionButton(IconData icon, String label, Color iconColor) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 22, color: iconColor),
-        const SizedBox(width: 8),
-        Text(
-          label,
-          style: GoogleFonts.poppins(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: Colors.white,
-          ),
-        ),
-      ],
-    );
-  }
 }
 
 class _ReportReaderScreen extends StatelessWidget {
-  final MemoryFrameDoc photo;
-
-  const _ReportReaderScreen({required this.photo});
+  final MemoryFrameDoc frame;
+  const _ReportReaderScreen({required this.frame});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.primarySurface,
-      body: CustomScrollView(
-        slivers: [
-          SliverAppBar(
-            expandedHeight: 300,
-            pinned: true,
-            backgroundColor: AppColors.surfaceElevated,
-            flexibleSpace: FlexibleSpaceBar(
-              background: Hero(
-                tag: 'photo_${photo.id}',
-                child: photo.imageUrl.startsWith('http')
-                    ? Image.network(photo.imageUrl, fit: BoxFit.cover)
-                    : Image.asset(photo.imageUrl, fit: BoxFit.cover),
-              ),
-            ),
-            leading: IconButton(
-              icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
-              style: IconButton.styleFrom(backgroundColor: Colors.black45),
-              onPressed: () => Navigator.of(context).pop(),
-            ),
+      appBar: AppBar(title: Text(frame.eventName.isNotEmpty ? frame.eventName : 'Event report')),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          ClipRRect(
+            borderRadius: AppRadius.borderRadiusLg,
+            child: Image.network(frame.imageUrl, fit: BoxFit.cover),
           ),
-          SliverToBoxAdapter(
-            child: Container(
-              color: AppColors.primarySurface,
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        photo.eventName,
-                        style: GoogleFonts.poppins(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.accent,
-                        ),
-                      ),
-                      Text(
-                        'Published by ${photo.uploadedBy}',
-                        style: GoogleFonts.poppins(
-                          fontSize: 12,
-                          color: AppColors.textTertiary,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  MarkdownBody(
-                    data: photo.reportMarkdown ?? '',
-                    styleSheet: MarkdownStyleSheet(
-                      h1: GoogleFonts.poppins(fontSize: 24, fontWeight: FontWeight.bold, color: AppColors.textPrimary),
-                      h2: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.textSecondary),
-                      p: GoogleFonts.poppins(fontSize: 14, color: AppColors.textSecondary, height: 1.6),
-                    ),
-                  ),
-                  const SizedBox(height: 48),
-                ],
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              const AiBadge(label: 'AI Report'),
+              const SizedBox(width: 8),
+              Text(
+                'Published by ${frame.uploaderName}',
+                style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textTertiary),
               ),
-            ),
+            ],
           ),
+          const SizedBox(height: 16),
+          MarkdownBody(data: frame.reportMarkdown ?? ''),
         ],
       ),
     );

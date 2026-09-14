@@ -37,6 +37,10 @@ admin.initializeApp({
 
 const app = express();
 
+// Render sits behind one proxy; without this every user shares the proxy's IP
+// for rate limiting.
+app.set('trust proxy', 1);
+
 // Security headers
 app.use(helmet());
 

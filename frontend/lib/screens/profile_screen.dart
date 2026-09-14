@@ -1,13 +1,68 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../core/theme/app_tokens.dart';
-import '../services/firebase_service.dart';
-import '../features/auth/presentation/auth_controller.dart';
+import 'package:google_fonts/google_fonts.dart';
 
-/// Student personal dashboard featuring profile header and a 3-tab view:
-/// My Tickets, My Uploads, and Attendance Requests.
+import '../core/theme/app_tokens.dart';
+import '../features/auth/data/user_doc.dart';
+import '../features/auth/presentation/auth_controller.dart';
+import '../models/firestore/attendance_request.dart';
+import '../models/firestore/event_doc.dart';
+import '../models/firestore/memory_frame_doc.dart';
+import '../models/project_model.dart';
+import '../services/firebase_service.dart';
+import '../utils/friendly_error.dart';
+import '../widgets/shared_widgets.dart';
+import 'events_hub_screen.dart' show formatEventDate;
+
+String? get _uid => FirebaseAuth.instance.currentUser?.uid;
+
+/// Events the student is registered for, newest registration first.
+final myTicketsProvider = StreamProvider.autoDispose<List<EventDoc>>((ref) {
+  if (_uid == null) return Stream.value(const []);
+  return FirebaseFirestore.instance
+      .collectionGroup('registrations')
+      .where('studentUid', isEqualTo: _uid)
+      .orderBy('registeredAt', descending: true)
+      .snapshots()
+      .asyncMap((snap) async {
+    final docs = await Future.wait(snap.docs.map((reg) => EventDoc.docRef(
+          reg.data()['eventId'] as String? ?? reg.reference.parent.parent!.id,
+        ).get()));
+    return docs.where((d) => d.exists).map(EventDoc.fromFirestore).toList();
+  });
+});
+
+final myFramesProvider = StreamProvider.autoDispose<List<MemoryFrameDoc>>((ref) {
+  if (_uid == null) return Stream.value(const []);
+  return MemoryFrameDoc.collection
+      .where('uploadedBy', isEqualTo: _uid)
+      .orderBy('createdAt', descending: true)
+      .snapshots()
+      .map((snap) => snap.docs.map(MemoryFrameDoc.fromFirestore).toList());
+});
+
+final myProjectsProvider = StreamProvider.autoDispose<List<ProjectDoc>>((ref) {
+  if (_uid == null) return Stream.value(const []);
+  return ProjectDoc.collection
+      .where('ownerUid', isEqualTo: _uid)
+      .orderBy('createdAt', descending: true)
+      .snapshots()
+      .map((snap) => snap.docs.map(ProjectDoc.fromFirestore).toList());
+});
+
+final myAttendanceProvider = StreamProvider.autoDispose<List<AttendanceRequestDoc>>((ref) {
+  if (_uid == null) return Stream.value(const []);
+  return AttendanceRequestDoc.collection
+      .where('studentId', isEqualTo: _uid)
+      .snapshots()
+      .map((snap) => snap.docs.map(AttendanceRequestDoc.fromFirestore).toList()
+        ..sort((a, b) => (b.createdAt ?? DateTime.now()).compareTo(a.createdAt ?? DateTime.now())));
+});
+
+/// "My Dashboard": profile header plus tickets, uploads and attendance (spec §6).
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
 
@@ -16,28 +71,132 @@ class ProfileScreen extends ConsumerStatefulWidget {
 }
 
 class _ProfileScreenState extends ConsumerState<ProfileScreen> {
-  bool _isLoggingOut = false;
+  bool _loggingOut = false;
+
+  Future<void> _logout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Log out?'),
+        content: const Text('You will need to sign in again to use AIKYA.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: AppColors.error),
+            child: const Text('Log out'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _loggingOut = true);
+    await ref.read(authControllerProvider.notifier).logout();
+    // The router sends the user to /login once auth state clears.
+    if (mounted) setState(() => _loggingOut = false);
+  }
 
   @override
   Widget build(BuildContext context) {
+    final user = ref.watch(currentUserDocProvider).valueOrNull;
+    if (user == null) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+
+    final isStudent = user.role == UserRole.student;
+    final tabs = isStudent ? const ['My Tickets', 'My Uploads', 'Attendance'] : const ['My Uploads'];
+
     return DefaultTabController(
-      length: 3,
+      length: tabs.length,
       child: Scaffold(
-        backgroundColor: AppColors.primarySurface,
         body: SafeArea(
           bottom: false,
-          child: Column(
+          child: NestedScrollView(
+            headerSliverBuilder: (_, __) => [
+              const SliverToBoxAdapter(child: ScreenHeader(title: 'My Dashboard')),
+              SliverToBoxAdapter(child: _buildHeader(user)),
+              SliverToBoxAdapter(child: _buildActions(user)),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                  child: TabBar(
+                    isScrollable: false,
+                    indicatorColor: AppColors.accent,
+                    labelColor: AppColors.textPrimary,
+                    unselectedLabelColor: AppColors.textTertiary,
+                    labelStyle: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w700),
+                    tabs: [for (final t in tabs) Tab(text: t)],
+                  ),
+                ),
+              ),
+            ],
+            body: TabBarView(
+              children: [
+                if (isStudent) const _TicketsTab(),
+                _UploadsTab(isStudent: isStudent),
+                if (isStudent) const _AttendanceTab(),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader(UserDoc user) {
+    final photo = user.profilePictureUrl;
+    final details = user.role == UserRole.student
+        ? ['USN ${user.usn}', '${user.yearOfStudy ?? '-'} Year', if (user.batch != null) user.batch!]
+        : [user.designation ?? user.role.label, if (user.club != null) user.club!, if (user.facultyId != null) 'ID ${user.facultyId}'];
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Row(
             children: [
-              _buildAppBar(context),
-              _buildProfileHeader(context, ref),
-              _buildActionButtons(context, ref),
-              _buildTabBar(),
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: AppColors.aiBadgeGradient,
+                  image: photo != null && photo.isNotEmpty
+                      ? DecorationImage(image: NetworkImage(photo), fit: BoxFit.cover)
+                      : null,
+                ),
+                child: photo == null || photo.isEmpty
+                    ? Center(
+                        child: Text(
+                          user.initials,
+                          style: GoogleFonts.poppins(fontSize: 26, fontWeight: FontWeight.w700, color: Colors.white),
+                        ),
+                      )
+                    : null,
+              ),
+              const SizedBox(width: 16),
               Expanded(
-                child: TabBarView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _buildTicketsTab(),
-                    _buildUploadsTab(),
-                    _buildAttendanceTab(),
+                    Text(
+                      user.fullName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 4),
+                    TagChip(label: user.role.label),
+                    const SizedBox(height: 4),
+                    Text(
+                      details.join(' · '),
+                      style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary),
+                    ),
+                    if (user.status == 'pending_batch_review')
+                      Text(
+                        'Batch details pending HOD review',
+                        style: GoogleFonts.poppins(fontSize: 11, color: AppColors.warning),
+                      ),
                   ],
                 ),
               ),
@@ -48,674 +207,344 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     );
   }
 
-  // ─── App Bar ──────────────────────────────────────────────────────
-  Widget _buildAppBar(BuildContext context) {
+  Widget _buildActions(UserDoc user) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
         children: [
-          GestureDetector(
-            onTap: () => Navigator.of(context).pop(),
-            child: Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: AppColors.surfaceElevated,
-                borderRadius: AppRadius.borderRadiusSm,
-                border: Border.all(color: AppColors.border),
-              ),
-              child: const Icon(Icons.arrow_back_rounded,
-                  size: 20, color: AppColors.textSecondary),
-            ),
+          ElevatedButton.icon(
+            onPressed: () => context.push('/profile/edit'),
+            icon: const Icon(Icons.edit_rounded, size: 16),
+            label: const Text('Edit Profile'),
           ),
-          Text(
-            'My Dashboard',
-            style: GoogleFonts.poppins(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary,
+          if (user.role.isStaff)
+            OutlinedButton.icon(
+              onPressed: () => context.push('/create_update'),
+              icon: const Icon(Icons.campaign_outlined, size: 16),
+              label: const Text('Post Update'),
             ),
-          ),
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: AppColors.surfaceElevated,
-              borderRadius: AppRadius.borderRadiusSm,
-              border: Border.all(color: AppColors.border),
+          if (user.role.canBuildEvents)
+            OutlinedButton.icon(
+              onPressed: () => context.push('/admin'),
+              icon: const Icon(Icons.admin_panel_settings_outlined, size: 16),
+              label: const Text('Admin Panel'),
             ),
-            child: const Icon(Icons.settings_outlined,
-                size: 20, color: AppColors.textSecondary),
+          OutlinedButton.icon(
+            onPressed: _loggingOut ? null : _logout,
+            style: OutlinedButton.styleFrom(foregroundColor: AppColors.error),
+            icon: const Icon(Icons.logout_rounded, size: 16),
+            label: const Text('Logout'),
           ),
         ],
       ),
     );
   }
+}
 
-  // ─── Profile Header ───────────────────────────────────────────────
-  Widget _buildProfileHeader(BuildContext context, WidgetRef ref) {
-    final userDocAsync = ref.watch(currentUserDocProvider);
-    final userDoc = userDocAsync.valueOrNull;
+Widget _asyncList<T>(
+  AsyncValue<List<T>> value, {
+  required IconData emptyIcon,
+  required String emptyMessage,
+  required Widget Function(List<T>) builder,
+}) {
+  return value.when(
+    loading: () => const Center(child: CircularProgressIndicator()),
+    error: (e, _) => EmptyState(icon: Icons.error_outline, message: friendlyError(e)),
+    data: (list) => list.isEmpty ? EmptyState(icon: emptyIcon, message: emptyMessage) : builder(list),
+  );
+}
 
-    if (userDoc == null) {
-      return const Padding(
-        padding: EdgeInsets.all(20),
-        child: CircularProgressIndicator(),
+class _TicketsTab extends ConsumerWidget {
+  const _TicketsTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return _asyncList(
+      ref.watch(myTicketsProvider),
+      emptyIcon: Icons.confirmation_number_outlined,
+      emptyMessage: 'No tickets yet. Register for an event from the Events Hub.',
+      builder: (events) => ListView.separated(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
+        itemCount: events.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 12),
+        itemBuilder: (_, i) {
+          final event = events[i];
+          return Card(
+            child: ListTile(
+              contentPadding: const EdgeInsets.all(16),
+              onTap: () => context.push('/events/${event.id}'),
+              title: Text(event.title, style: GoogleFonts.poppins(fontWeight: FontWeight.w700)),
+              subtitle: Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(formatEventDate(event.eventDate)),
+                    Text(event.venue),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Registration #${event.id.substring(0, event.id.length.clamp(0, 6)).toUpperCase()}',
+                      style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textTertiary, letterSpacing: 1),
+                    ),
+                  ],
+                ),
+              ),
+              trailing: TagChip(
+                label: event.isPast ? 'Past' : 'Upcoming',
+                color: event.isPast ? AppColors.textTertiary : AppColors.accent,
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _UploadsTab extends ConsumerWidget {
+  final bool isStudent;
+  const _UploadsTab({required this.isStudent});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final frames = ref.watch(myFramesProvider).valueOrNull ?? const [];
+    final projects = isStudent ? ref.watch(myProjectsProvider).valueOrNull ?? const [] : const <ProjectDoc>[];
+
+    if (frames.isEmpty && projects.isEmpty) {
+      return EmptyState(
+        icon: Icons.cloud_upload_outlined,
+        message: isStudent
+            ? 'Nothing uploaded yet. Submit a project or share a memory.'
+            : 'Nothing uploaded yet. Share a memory from the Memory Wall.',
+        action: OutlinedButton(onPressed: () => context.push('/memory'), child: const Text('Open Memory Wall')),
       );
     }
 
-    final initials = userDoc.fullName.isNotEmpty
-        ? userDoc.fullName.trim().split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join().toUpperCase()
-        : '??';
-
-    final usn = userDoc.usn.isNotEmpty ? userDoc.usn : 'N/A';
-    final batch = userDoc.batch ?? 'Unknown Batch';
-    final year = userDoc.yearOfStudy != null ? '${userDoc.yearOfStudy} Year' : 'Unknown Year';
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: AppColors.surfaceElevated,
-          borderRadius: AppRadius.borderRadiusLg,
-          border: Border.all(color: AppColors.border),
-          boxShadow: AppShadows.md,
-        ),
-        child: Row(
-          children: [
-            // Avatar
-            Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: AppColors.aiBadgeGradient,
-                image: userDoc.profilePictureUrl != null && userDoc.profilePictureUrl!.isNotEmpty
-                    ? DecorationImage(
-                        image: NetworkImage(userDoc.profilePictureUrl!),
-                        fit: BoxFit.cover,
-                      )
-                    : null,
-              ),
-              child: userDoc.profilePictureUrl == null || userDoc.profilePictureUrl!.isEmpty
-                  ? Center(
-                      child: Text(
-                        initials,
-                        style: GoogleFonts.poppins(
-                          fontSize: 28,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
-                        ),
-                      ),
-                    )
-                  : null,
-            ),
-            const SizedBox(width: 20),
-            // Details
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    userDoc.fullName,
-                    style: GoogleFonts.poppins(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.textPrimary,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: AppColors.primaryContainer,
-                      borderRadius: AppRadius.borderRadiusXs,
-                    ),
-                    child: Text(
-                      'USN: $usn',
-                      style: GoogleFonts.poppins(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.accent,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '$year · $batch',
-                    style: GoogleFonts.poppins(
-                      fontSize: 13,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            // Edit Button
-            Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: () {
-                  context.push('/profile/edit');
-                },
-                borderRadius: BorderRadius.circular(999),
-                child: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: AppColors.primaryContainer,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: const Icon(Icons.edit_rounded, size: 18, color: AppColors.accent),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ─── Action Buttons (Edit Profile + Logout) ──────────────────────
-  Widget _buildActionButtons(BuildContext context, WidgetRef ref) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-      child: Row(
-        children: [
-          // Edit Profile Button
-          Expanded(
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: () => context.push('/profile/edit'),
-                borderRadius: AppRadius.borderRadiusSm,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  decoration: BoxDecoration(
-                    color: AppColors.accent,
-                    borderRadius: AppRadius.borderRadiusSm,
-                    boxShadow: AppShadows.sm,
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.edit_rounded, size: 16, color: Colors.white),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Edit Profile',
-                        style: GoogleFonts.poppins(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          // Logout Button
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: _isLoggingOut ? null : () => _showLogoutConfirmation(context, ref),
-              borderRadius: AppRadius.borderRadiusSm,
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 20),
-                decoration: BoxDecoration(
-                  color: AppColors.error.withValues(alpha: 0.08),
-                  borderRadius: AppRadius.borderRadiusSm,
-                  border: Border.all(color: AppColors.error.withValues(alpha: 0.25)),
-                ),
-                child: _isLoggingOut
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(AppColors.error),
-                        ),
-                      )
-                    : Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.logout_rounded, size: 16, color: AppColors.error),
-                          const SizedBox(width: 6),
-                          Text(
-                            'Logout',
-                            style: GoogleFonts.poppins(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.error,
-                            ),
-                          ),
-                        ],
-                      ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showLogoutConfirmation(BuildContext context, WidgetRef ref) {
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: AppRadius.borderRadiusLg),
-        backgroundColor: AppColors.surfaceElevated,
-        title: Text(
-          'Logout',
-          style: GoogleFonts.poppins(
-            fontWeight: FontWeight.w700,
-            color: AppColors.textPrimary,
-          ),
-        ),
-        content: Text(
-          'Are you sure you want to logout? You will need to sign in again to access your dashboard.',
-          style: GoogleFonts.poppins(
-            fontSize: 14,
-            color: AppColors.textSecondary,
-            height: 1.5,
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: Text(
-              'Cancel',
-              style: GoogleFonts.poppins(
-                fontWeight: FontWeight.w600,
-                color: AppColors.textSecondary,
-              ),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(dialogContext).pop();
-              _performLogout(ref);
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.error,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: AppRadius.borderRadiusSm),
-            ),
-            child: Text(
-              'Logout',
-              style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _performLogout(WidgetRef ref) async {
-    setState(() => _isLoggingOut = true);
-    try {
-      await ref.read(authControllerProvider.notifier).logout();
-      // GoRouter redirect will automatically navigate to /login
-      // once authState changes to unauthenticated
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Logout failed: ${e.toString()}'),
-            backgroundColor: AppColors.error,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isLoggingOut = false);
-      }
-    }
-  }
-
-  // ─── Tab Bar ──────────────────────────────────────────────────────
-  Widget _buildTabBar() {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(20, 24, 20, 0),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: AppColors.border, width: 2)),
-      ),
-      child: TabBar(
-        indicatorColor: AppColors.accent,
-        indicatorWeight: 3,
-        labelColor: AppColors.textPrimary,
-        unselectedLabelColor: AppColors.textTertiary,
-        labelStyle: GoogleFonts.poppins(
-          fontSize: 13,
-          fontWeight: FontWeight.w700,
-        ),
-        unselectedLabelStyle: GoogleFonts.poppins(
-          fontSize: 13,
-          fontWeight: FontWeight.w500,
-        ),
-        tabs: const [
-          Tab(text: 'My Tickets'),
-          Tab(text: 'My Uploads'),
-          Tab(text: 'Attendance'),
-        ],
-      ),
-    );
-  }
-
-  // ─── TAB 1: Tickets ───────────────────────────────────────────────
-  Widget _buildTicketsTab() {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
       children: [
-        _ticketCard(
-          eventName: 'Neural Hack 2026',
-          date: 'Sep 15, 9:00 AM',
-          venue: 'Main Lab 1',
-          ticketId: 'TKT-8839-AI',
-          isActive: true,
-        ),
-        const SizedBox(height: 16),
-        _ticketCard(
-          eventName: 'GenAI Workshop',
-          date: 'Aug 22, 2:00 PM',
-          venue: 'Seminar Hall',
-          ticketId: 'TKT-4122-AI',
-          isActive: false,
-        ),
-      ],
-    );
-  }
-
-  Widget _ticketCard({
-    required String eventName,
-    required String date,
-    required String venue,
-    required String ticketId,
-    required bool isActive,
-  }) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surfaceElevated,
-        borderRadius: AppRadius.borderRadiusLg,
-        border: Border.all(color: AppColors.border),
-        boxShadow: AppShadows.sm,
-      ),
-      child: Row(
-        children: [
-          // Left side - Details
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: isActive ? AppColors.accent.withValues(alpha: 0.15) : AppColors.primaryContainer,
-                      borderRadius: AppRadius.borderRadiusXs,
-                    ),
-                    child: Text(
-                      isActive ? 'UPCOMING' : 'PAST EVENT',
-                      style: GoogleFonts.poppins(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: isActive ? AppColors.accent : AppColors.textTertiary,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    eventName,
-                    style: GoogleFonts.poppins(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      const Icon(Icons.calendar_today_outlined, size: 12, color: AppColors.textSecondary),
-                      const SizedBox(width: 6),
-                      Text(date, style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      const Icon(Icons.location_on_outlined, size: 12, color: AppColors.textSecondary),
-                      const SizedBox(width: 6),
-                      Text(venue, style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    ticketId,
-                    style: GoogleFonts.poppins(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textTertiary,
-                      letterSpacing: 1,
-                    ),
-                  ),
-                ],
+        if (projects.isNotEmpty) ...[
+          Text('Projects', style: GoogleFonts.poppins(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          for (final p in projects)
+            Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                onTap: () => context.push('/projects/detail/${p.id}'),
+                leading: const Icon(Icons.folder_rounded, color: AppColors.secondary),
+                title: Text(p.title),
+                subtitle: Text(p.techStack.join(', ')),
+                trailing: const Icon(Icons.chevron_right_rounded),
               ),
             ),
-          ),
-          // Right side - QR Code (simulated with standard divider approach)
-          Container(
-            width: 1,
-            height: 130,
-            decoration: BoxDecoration(
-              border: Border(
-                left: BorderSide(
-                  color: AppColors.border,
-                  width: 2,
-                  style: BorderStyle.solid,
-                ),
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(20),
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: isActive ? Colors.white : Colors.white.withValues(alpha: 0.5),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(
-                Icons.qr_code_2_rounded,
-                size: 64,
-                color: isActive ? Colors.black : Colors.black54,
-              ),
-            ),
-          ),
+          const SizedBox(height: 16),
         ],
-      ),
-    );
-  }
-
-  // ─── TAB 2: Uploads ───────────────────────────────────────────────
-  Widget _buildUploadsTab() {
-    return GridView.count(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
-      crossAxisCount: 2,
-      crossAxisSpacing: 12,
-      mainAxisSpacing: 12,
-      children: [
-        _uploadThumb('assets/images/proj_robot.jpg', status: 'Pending'),
-        _uploadThumb('assets/images/proj_drone.jpg', status: 'Approved'),
-        _uploadThumb('assets/images/proj_stock.jpg', status: 'Approved'),
-        _uploadThumb('assets/images/event_hackathon.jpg', status: 'Approved'),
-      ],
-    );
-  }
-
-  Widget _uploadThumb(String imagePath, {required String status}) {
-    final isPending = status == 'Pending';
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: AppRadius.borderRadiusMd,
-        border: Border.all(color: AppColors.border),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          Image.asset(imagePath, fit: BoxFit.cover),
-          Positioned(
-            bottom: 8,
-            left: 8,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: isPending ? AppColors.warning : AppColors.success,
-                borderRadius: AppRadius.borderRadiusFull,
-              ),
-              child: Text(
-                status.toUpperCase(),
-                style: GoogleFonts.poppins(
-                  fontSize: 9,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.primary,
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ─── TAB 3: Attendance ────────────────────────────────────────────
-  Widget _buildAttendanceTab() {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
-      children: [
-        _attendanceRequest(
-          title: 'Hackathon Duty Leave',
-          date: 'Sep 15, 2026',
-          status: 'Approved',
-          message: 'Granted leave for organizing Neural Hack.',
-        ),
-        _attendanceRequest(
-          title: 'Medical Leave',
-          date: 'Aug 04, 2026',
-          status: 'Rejected',
-          message: 'Medical certificate not attached. Please resubmit.',
-        ),
-        _attendanceRequest(
-          title: 'Paper Presentation',
-          date: 'Jul 22, 2026',
-          status: 'Approved',
-          message: 'Approved for IEEE conference in Bangalore.',
-        ),
-      ],
-    );
-  }
-
-  Widget _attendanceRequest({
-    required String title,
-    required String date,
-    required String status,
-    required String message,
-  }) {
-    Color statusColor;
-    if (status == 'Approved') {
-      statusColor = AppColors.success;
-    } else if (status == 'Rejected') {
-      statusColor = AppColors.error;
-    } else {
-      statusColor = AppColors.warning;
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceElevated,
-        borderRadius: AppRadius.borderRadiusLg,
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        if (frames.isNotEmpty) ...[
+          Text('Memory Wall uploads', style: GoogleFonts.poppins(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          GridView.count(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisCount: 3,
+            mainAxisSpacing: 8,
+            crossAxisSpacing: 8,
             children: [
-              Text(
-                title,
-                style: GoogleFonts.poppins(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: statusColor.withValues(alpha: 0.15),
-                  borderRadius: AppRadius.borderRadiusSm,
-                  border: Border.all(color: statusColor.withValues(alpha: 0.3)),
-                ),
-                child: Text(
-                  status.toUpperCase(),
-                  style: GoogleFonts.poppins(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w700,
-                    color: statusColor,
-                    letterSpacing: 0.5,
+              for (final f in frames)
+                ClipRRect(
+                  borderRadius: AppRadius.borderRadiusMd,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Image.network(f.imageUrl, fit: BoxFit.cover),
+                      Positioned(
+                        left: 4,
+                        bottom: 4,
+                        child: TagChip(
+                          label: f.status.name,
+                          color: switch (f.status) {
+                            FrameStatus.approved => AppColors.success,
+                            FrameStatus.rejected => AppColors.error,
+                            FrameStatus.pending => AppColors.warning,
+                          },
+                        ),
+                      ),
+                    ],
                   ),
                 ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _AttendanceTab extends ConsumerWidget {
+  const _AttendanceTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final requests = ref.watch(myAttendanceProvider);
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+          child: SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () => _showNewRequestDialog(context, ref),
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('New attendance / OD request'),
+            ),
+          ),
+        ),
+        Expanded(
+          child: _asyncList(
+            requests,
+            emptyIcon: Icons.fact_check_outlined,
+            emptyMessage: 'No attendance requests yet.',
+            builder: (list) => ListView.separated(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
+              itemCount: list.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              itemBuilder: (_, i) => _AttendanceCard(request: list[i]),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _showNewRequestDialog(BuildContext context, WidgetRef ref) async {
+    final events = ref.read(myTicketsProvider).valueOrNull ?? const [];
+    if (events.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Register for an event first — requests are tied to an event.')),
+      );
+      return;
+    }
+
+    String eventId = events.first.id;
+    final detailsController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+
+    final submitted = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Attendance request'),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButtonFormField<String>(
+                initialValue: eventId,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Event'),
+                items: [
+                  for (final e in events)
+                    DropdownMenuItem(value: e.id, child: Text(e.title, overflow: TextOverflow.ellipsis)),
+                ],
+                onChanged: (v) => eventId = v ?? eventId,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: detailsController,
+                minLines: 3,
+                maxLines: 5,
+                maxLength: 500,
+                decoration: const InputDecoration(
+                  labelText: 'Details',
+                  hintText: 'Which classes did you miss and why?',
+                ),
+                validator: (v) => (v ?? '').trim().length < 10 ? 'Please add a little more detail' : null,
               ),
             ],
           ),
-          const SizedBox(height: 6),
-          Text(
-            date,
-            style: GoogleFonts.poppins(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textTertiary,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppColors.primaryContainer,
-              borderRadius: AppRadius.borderRadiusSm,
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(Icons.info_outline_rounded, size: 14, color: AppColors.textSecondary),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    message,
-                    style: GoogleFonts.poppins(
-                      fontSize: 12,
-                      color: AppColors.textSecondary,
-                      height: 1.4,
-                    ),
-                  ),
-                ),
-              ],
-            ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () {
+              if (formKey.currentState!.validate()) Navigator.pop(ctx, true);
+            },
+            child: const Text('Submit'),
           ),
         ],
+      ),
+    );
+
+    final details = detailsController.text.trim();
+    detailsController.dispose();
+    if (submitted != true || _uid == null) return;
+
+    try {
+      await AttendanceRequestDoc.collection.add(AttendanceRequestDoc.newRequest(
+        studentId: _uid!,
+        eventId: eventId,
+        requestDetails: details,
+      ));
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Request sent to the HOD for review.')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(friendlyError(e)), backgroundColor: AppColors.error),
+        );
+      }
+    }
+  }
+}
+
+class _AttendanceCard extends StatelessWidget {
+  final AttendanceRequestDoc request;
+  const _AttendanceCard({required this.request});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = switch (request.status) {
+      'approved' => AppColors.success,
+      'rejected' => AppColors.error,
+      _ => AppColors.warning,
+    };
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            FutureBuilder(
+              future: EventDoc.docRef(request.eventId).get(),
+              builder: (context, snapshot) => Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      snapshot.data?.data()?['title'] as String? ?? 'Event',
+                      style: GoogleFonts.poppins(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  TagChip(label: request.status, color: color),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(request.requestDetails, style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary)),
+            if ((request.reviewNotes ?? '').isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                'HOD note: ${request.reviewNotes}',
+                style: GoogleFonts.poppins(fontSize: 12, fontStyle: FontStyle.italic),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

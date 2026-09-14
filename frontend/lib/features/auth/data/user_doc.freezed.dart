@@ -562,7 +562,7 @@ as bool,
 /// @nodoc
 mixin _$UserDoc {
 
- String get uid; String get email; String get usn; String get fullName; UserRole get role; bool get profileComplete; String? get phone; String? get yearOfStudy; String? get batch; String? get instagramHandle; String? get personalWebsite; String? get profilePictureUrl; String? get bio; List<String> get skills; String? get githubUrl; String? get linkedinUrl; String? get twitterHandle; String? get discordHandle; String? get status;// e.g. pending_batch_review
+ String get uid; String get email; String get usn; String get fullName;@JsonKey(unknownEnumValue: UserRole.student) UserRole get role; bool get profileComplete; String? get phone; String? get yearOfStudy; String? get batch; String? get instagramHandle; String? get personalWebsite; String? get profilePictureUrl; String? get bio; List<String> get skills; String? get githubUrl; String? get linkedinUrl; String? get twitterHandle; String? get discordHandle; String? get status;// e.g. pending_batch_review
  bool get mustResetPassword; String? get facultyId; String? get designation; String? get club; String? get fcmToken; PrivacySettings get privacySettings; NotificationSettings get notificationSettings;@DateTimeConverter() DateTime? get createdAt;
 /// Create a copy of UserDoc
 /// with the given fields replaced by the non-null parameter values.
@@ -596,7 +596,7 @@ abstract mixin class $UserDocCopyWith<$Res>  {
   factory $UserDocCopyWith(UserDoc value, $Res Function(UserDoc) _then) = _$UserDocCopyWithImpl;
 @useResult
 $Res call({
- String uid, String email, String usn, String fullName, UserRole role, bool profileComplete, String? phone, String? yearOfStudy, String? batch, String? instagramHandle, String? personalWebsite, String? profilePictureUrl, String? bio, List<String> skills, String? githubUrl, String? linkedinUrl, String? twitterHandle, String? discordHandle, String? status, bool mustResetPassword, String? facultyId, String? designation, String? club, String? fcmToken, PrivacySettings privacySettings, NotificationSettings notificationSettings,@DateTimeConverter() DateTime? createdAt
+ String uid, String email, String usn, String fullName,@JsonKey(unknownEnumValue: UserRole.student) UserRole role, bool profileComplete, String? phone, String? yearOfStudy, String? batch, String? instagramHandle, String? personalWebsite, String? profilePictureUrl, String? bio, List<String> skills, String? githubUrl, String? linkedinUrl, String? twitterHandle, String? discordHandle, String? status, bool mustResetPassword, String? facultyId, String? designation, String? club, String? fcmToken, PrivacySettings privacySettings, NotificationSettings notificationSettings,@DateTimeConverter() DateTime? createdAt
 });
 
 
@@ -745,7 +745,7 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String uid,  String email,  String usn,  String fullName,  UserRole role,  bool profileComplete,  String? phone,  String? yearOfStudy,  String? batch,  String? instagramHandle,  String? personalWebsite,  String? profilePictureUrl,  String? bio,  List<String> skills,  String? githubUrl,  String? linkedinUrl,  String? twitterHandle,  String? discordHandle,  String? status,  bool mustResetPassword,  String? facultyId,  String? designation,  String? club,  String? fcmToken,  PrivacySettings privacySettings,  NotificationSettings notificationSettings, @DateTimeConverter()  DateTime? createdAt)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String uid,  String email,  String usn,  String fullName, @JsonKey(unknownEnumValue: UserRole.student)  UserRole role,  bool profileComplete,  String? phone,  String? yearOfStudy,  String? batch,  String? instagramHandle,  String? personalWebsite,  String? profilePictureUrl,  String? bio,  List<String> skills,  String? githubUrl,  String? linkedinUrl,  String? twitterHandle,  String? discordHandle,  String? status,  bool mustResetPassword,  String? facultyId,  String? designation,  String? club,  String? fcmToken,  PrivacySettings privacySettings,  NotificationSettings notificationSettings, @DateTimeConverter()  DateTime? createdAt)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _UserDoc() when $default != null:
 return $default(_that.uid,_that.email,_that.usn,_that.fullName,_that.role,_that.profileComplete,_that.phone,_that.yearOfStudy,_that.batch,_that.instagramHandle,_that.personalWebsite,_that.profilePictureUrl,_that.bio,_that.skills,_that.githubUrl,_that.linkedinUrl,_that.twitterHandle,_that.discordHandle,_that.status,_that.mustResetPassword,_that.facultyId,_that.designation,_that.club,_that.fcmToken,_that.privacySettings,_that.notificationSettings,_that.createdAt);case _:
@@ -766,7 +766,7 @@ return $default(_that.uid,_that.email,_that.usn,_that.fullName,_that.role,_that.
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String uid,  String email,  String usn,  String fullName,  UserRole role,  bool profileComplete,  String? phone,  String? yearOfStudy,  String? batch,  String? instagramHandle,  String? personalWebsite,  String? profilePictureUrl,  String? bio,  List<String> skills,  String? githubUrl,  String? linkedinUrl,  String? twitterHandle,  String? discordHandle,  String? status,  bool mustResetPassword,  String? facultyId,  String? designation,  String? club,  String? fcmToken,  PrivacySettings privacySettings,  NotificationSettings notificationSettings, @DateTimeConverter()  DateTime? createdAt)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String uid,  String email,  String usn,  String fullName, @JsonKey(unknownEnumValue: UserRole.student)  UserRole role,  bool profileComplete,  String? phone,  String? yearOfStudy,  String? batch,  String? instagramHandle,  String? personalWebsite,  String? profilePictureUrl,  String? bio,  List<String> skills,  String? githubUrl,  String? linkedinUrl,  String? twitterHandle,  String? discordHandle,  String? status,  bool mustResetPassword,  String? facultyId,  String? designation,  String? club,  String? fcmToken,  PrivacySettings privacySettings,  NotificationSettings notificationSettings, @DateTimeConverter()  DateTime? createdAt)  $default,) {final _that = this;
 switch (_that) {
 case _UserDoc():
 return $default(_that.uid,_that.email,_that.usn,_that.fullName,_that.role,_that.profileComplete,_that.phone,_that.yearOfStudy,_that.batch,_that.instagramHandle,_that.personalWebsite,_that.profilePictureUrl,_that.bio,_that.skills,_that.githubUrl,_that.linkedinUrl,_that.twitterHandle,_that.discordHandle,_that.status,_that.mustResetPassword,_that.facultyId,_that.designation,_that.club,_that.fcmToken,_that.privacySettings,_that.notificationSettings,_that.createdAt);case _:
@@ -786,7 +786,7 @@ return $default(_that.uid,_that.email,_that.usn,_that.fullName,_that.role,_that.
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String uid,  String email,  String usn,  String fullName,  UserRole role,  bool profileComplete,  String? phone,  String? yearOfStudy,  String? batch,  String? instagramHandle,  String? personalWebsite,  String? profilePictureUrl,  String? bio,  List<String> skills,  String? githubUrl,  String? linkedinUrl,  String? twitterHandle,  String? discordHandle,  String? status,  bool mustResetPassword,  String? facultyId,  String? designation,  String? club,  String? fcmToken,  PrivacySettings privacySettings,  NotificationSettings notificationSettings, @DateTimeConverter()  DateTime? createdAt)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String uid,  String email,  String usn,  String fullName, @JsonKey(unknownEnumValue: UserRole.student)  UserRole role,  bool profileComplete,  String? phone,  String? yearOfStudy,  String? batch,  String? instagramHandle,  String? personalWebsite,  String? profilePictureUrl,  String? bio,  List<String> skills,  String? githubUrl,  String? linkedinUrl,  String? twitterHandle,  String? discordHandle,  String? status,  bool mustResetPassword,  String? facultyId,  String? designation,  String? club,  String? fcmToken,  PrivacySettings privacySettings,  NotificationSettings notificationSettings, @DateTimeConverter()  DateTime? createdAt)?  $default,) {final _that = this;
 switch (_that) {
 case _UserDoc() when $default != null:
 return $default(_that.uid,_that.email,_that.usn,_that.fullName,_that.role,_that.profileComplete,_that.phone,_that.yearOfStudy,_that.batch,_that.instagramHandle,_that.personalWebsite,_that.profilePictureUrl,_that.bio,_that.skills,_that.githubUrl,_that.linkedinUrl,_that.twitterHandle,_that.discordHandle,_that.status,_that.mustResetPassword,_that.facultyId,_that.designation,_that.club,_that.fcmToken,_that.privacySettings,_that.notificationSettings,_that.createdAt);case _:
@@ -801,14 +801,14 @@ return $default(_that.uid,_that.email,_that.usn,_that.fullName,_that.role,_that.
 @JsonSerializable()
 
 class _UserDoc implements UserDoc {
-  const _UserDoc({required this.uid, this.email = '', this.usn = '', this.fullName = '', this.role = UserRole.student, this.profileComplete = false, this.phone, this.yearOfStudy, this.batch, this.instagramHandle, this.personalWebsite, this.profilePictureUrl, this.bio, final  List<String> skills = const [], this.githubUrl, this.linkedinUrl, this.twitterHandle, this.discordHandle, this.status, this.mustResetPassword = false, this.facultyId, this.designation, this.club, this.fcmToken, this.privacySettings = const PrivacySettings(), this.notificationSettings = const NotificationSettings(), @DateTimeConverter() this.createdAt}): _skills = skills;
+  const _UserDoc({required this.uid, this.email = '', this.usn = '', this.fullName = '', @JsonKey(unknownEnumValue: UserRole.student) this.role = UserRole.student, this.profileComplete = false, this.phone, this.yearOfStudy, this.batch, this.instagramHandle, this.personalWebsite, this.profilePictureUrl, this.bio, final  List<String> skills = const [], this.githubUrl, this.linkedinUrl, this.twitterHandle, this.discordHandle, this.status, this.mustResetPassword = false, this.facultyId, this.designation, this.club, this.fcmToken, this.privacySettings = const PrivacySettings(), this.notificationSettings = const NotificationSettings(), @DateTimeConverter() this.createdAt}): _skills = skills;
   factory _UserDoc.fromJson(Map<String, dynamic> json) => _$UserDocFromJson(json);
 
 @override final  String uid;
 @override@JsonKey() final  String email;
 @override@JsonKey() final  String usn;
 @override@JsonKey() final  String fullName;
-@override@JsonKey() final  UserRole role;
+@override@JsonKey(unknownEnumValue: UserRole.student) final  UserRole role;
 @override@JsonKey() final  bool profileComplete;
 @override final  String? phone;
 @override final  String? yearOfStudy;
@@ -872,7 +872,7 @@ abstract mixin class _$UserDocCopyWith<$Res> implements $UserDocCopyWith<$Res> {
   factory _$UserDocCopyWith(_UserDoc value, $Res Function(_UserDoc) _then) = __$UserDocCopyWithImpl;
 @override @useResult
 $Res call({
- String uid, String email, String usn, String fullName, UserRole role, bool profileComplete, String? phone, String? yearOfStudy, String? batch, String? instagramHandle, String? personalWebsite, String? profilePictureUrl, String? bio, List<String> skills, String? githubUrl, String? linkedinUrl, String? twitterHandle, String? discordHandle, String? status, bool mustResetPassword, String? facultyId, String? designation, String? club, String? fcmToken, PrivacySettings privacySettings, NotificationSettings notificationSettings,@DateTimeConverter() DateTime? createdAt
+ String uid, String email, String usn, String fullName,@JsonKey(unknownEnumValue: UserRole.student) UserRole role, bool profileComplete, String? phone, String? yearOfStudy, String? batch, String? instagramHandle, String? personalWebsite, String? profilePictureUrl, String? bio, List<String> skills, String? githubUrl, String? linkedinUrl, String? twitterHandle, String? discordHandle, String? status, bool mustResetPassword, String? facultyId, String? designation, String? club, String? fcmToken, PrivacySettings privacySettings, NotificationSettings notificationSettings,@DateTimeConverter() DateTime? createdAt
 });
 
 

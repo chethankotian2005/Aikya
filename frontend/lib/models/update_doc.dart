@@ -5,7 +5,7 @@ part 'update_doc.freezed.dart';
 part 'update_doc.g.dart';
 
 @freezed
-class UpdateDoc with _$UpdateDoc {
+abstract class UpdateDoc with _$UpdateDoc {
   const factory UpdateDoc({
     required String id,
     required String content,

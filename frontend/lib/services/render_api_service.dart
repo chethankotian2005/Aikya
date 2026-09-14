@@ -3,92 +3,126 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 
-/// Provides the RenderApiService instance.
 final renderApiServiceProvider = Provider<RenderApiService>((ref) {
   return RenderApiService();
 });
 
-class RenderApiService {
-  static const String baseUrl = 'https://aikya-backend-2t80.onrender.com/api';
+class ApiException implements Exception {
+  final int statusCode;
+  final String message;
 
-  Future<Map<String, String>> _getHeaders() async {
+  const ApiException(this.statusCode, this.message);
+
+  @override
+  String toString() => message;
+}
+
+/// Client for the shared Render backend (spec §7). Every call carries the
+/// caller's Firebase ID token; the backend re-checks the role server-side.
+class RenderApiService {
+  static const String baseUrl = String.fromEnvironment(
+    'AIKYA_API_BASE_URL',
+    defaultValue: 'https://aikya-backend-2t80.onrender.com/api',
+  );
+
+  // Render's free tier can take ~30s to wake up; Gemini calls add more.
+  static const _timeout = Duration(seconds: 90);
+
+  Future<Map<String, dynamic>> _send(String method, String path, Map<String, dynamic> body) async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      throw Exception('Not authenticated. Cannot call Render API.');
-    }
-    
-    // Force refresh to get the latest custom claims if any, though our backend
-    // reads the role directly from Firestore anyway.
+    if (user == null) throw const ApiException(401, 'Please sign in again.');
+
     final token = await user.getIdToken();
-    
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer $token',
-    };
+    final uri = Uri.parse('$baseUrl$path');
+    final headers = {'Content-Type': 'application/json', 'Authorization': 'Bearer $token'};
+    final encoded = jsonEncode(body);
+
+    final http.Response response;
+    try {
+      final request = method == 'PUT'
+          ? http.put(uri, headers: headers, body: encoded)
+          : http.post(uri, headers: headers, body: encoded);
+      response = await request.timeout(_timeout);
+    } on Exception {
+      throw const ApiException(0, 'Could not reach the AIKYA server. Check your connection and try again.');
+    }
+
+    Map<String, dynamic> data = const {};
+    try {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic>) data = decoded;
+    } catch (_) {}
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw ApiException(
+        response.statusCode,
+        data['error'] as String? ?? 'Request failed (${response.statusCode}).',
+      );
+    }
+    return data;
+  }
+
+  /// PUT /api/profile
+  Future<void> updateProfile(Map<String, dynamic> profile) => _send('PUT', '/profile', profile);
+
+  /// POST /api/messaging/updates — author details are filled in server-side.
+  Future<void> postUpdate({required String content, DateTime? deadlineDate}) {
+    return _send('POST', '/messaging/updates', {
+      'content': content,
+      if (deadlineDate != null) 'deadlineDate': deadlineDate.toIso8601String(),
+    });
   }
 
   /// POST /api/generate-report
   Future<String> generateReport({
     required String brief,
     String? eventId,
-    bool includeAttendance = false,
+    bool includeAttendance = true,
+    String? additionalContext,
   }) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/generate-report'),
-      headers: await _getHeaders(),
-      body: jsonEncode({
-        'brief': brief,
-        'eventId': eventId,
-        'includeAttendance': includeAttendance,
-      }),
-    );
-
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      return data['markdown'] as String;
-    } else {
-      throw Exception('Failed to generate report: ${response.body}');
-    }
+    final data = await _send('POST', '/generate-report', {
+      'brief': brief,
+      'eventId': eventId,
+      'includeAttendance': includeAttendance,
+      'additionalContext': ?additionalContext,
+    });
+    return data['markdown'] as String? ?? '';
   }
 
-  /// POST /api/compile-accreditation
-  Future<String> compileAccreditation({
+  /// POST /api/compile-accreditation — returns { reportId, pdfUrl, ... }.
+  Future<Map<String, dynamic>> compileAccreditation({
     required String semesterLabel,
     required List<String> eventIds,
-  }) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/compile-accreditation'),
-      headers: await _getHeaders(),
-      body: jsonEncode({
-        'semesterLabel': semesterLabel,
-        'eventIds': eventIds,
-      }),
-    );
-
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      return data['pdfUrl'] as String;
-    } else {
-      throw Exception('Failed to compile accreditation: ${response.body}');
-    }
+  }) {
+    return _send('POST', '/compile-accreditation', {
+      'semesterLabel': semesterLabel,
+      'eventIds': eventIds,
+    });
   }
 
-  /// POST /api/analyze-sentiment
-  Future<Map<String, dynamic>> analyzeSentiment({
-    required String eventId,
-  }) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/analyze-sentiment'),
-      headers: await _getHeaders(),
-      body: jsonEncode({
-        'eventId': eventId,
-      }),
-    );
+  /// POST /api/sentiment-rollup — returns { distribution, percentages, ... }.
+  Future<Map<String, dynamic>> sentimentRollup({required String eventId}) {
+    return _send('POST', '/sentiment-rollup', {'eventId': eventId});
+  }
 
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body) as Map<String, dynamic>;
-    } else {
-      throw Exception('Failed to analyze sentiment: ${response.body}');
-    }
+  /// POST /api/messaging/attendance/{approve|reject}
+  Future<void> reviewAttendance({required String requestId, required bool approve, String note = ''}) {
+    return _send('POST', '/messaging/attendance/${approve ? 'approve' : 'reject'}', {
+      'requestId': requestId,
+      'note': note,
+    });
+  }
+
+  /// POST /api/messaging/memory-frame/{approve|reject}
+  Future<void> reviewMemoryFrame({required String memoryId, required bool approve, String note = ''}) {
+    return _send('POST', '/messaging/memory-frame/${approve ? 'approve' : 'reject'}', {
+      'memoryId': memoryId,
+      'note': note,
+    });
+  }
+
+  /// POST /api/admin/provision-staff — returns { results, errors }.
+  Future<Map<String, dynamic>> provisionStaff(List<Map<String, dynamic>> staff) {
+    return _send('POST', '/admin/provision-staff', {'staff': staff});
   }
 }

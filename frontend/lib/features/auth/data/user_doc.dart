@@ -4,31 +4,30 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 part 'user_doc.freezed.dart';
 part 'user_doc.g.dart';
 
+/// Roles from spec §5. Unknown values decode to [student] (least privilege).
 enum UserRole {
   hod,
-  @JsonValue('coordinator') coordinator,
-  @JsonValue('faculty') faculty,
-  assistant,
+  coordinator,
+  faculty,
   student;
 
-  String get firestoreValue {
-    switch (this) {
-      case UserRole.hod:
-        return 'hod';
-      case UserRole.coordinator:
-        return 'coordinator';
-      case UserRole.faculty:
-        return 'faculty';
-      case UserRole.assistant:
-        return 'assistant';
-      case UserRole.student:
-        return 'student';
-    }
-  }
+  String get firestoreValue => name;
+
+  String get label => switch (this) {
+        UserRole.hod => 'HOD',
+        UserRole.coordinator => 'Coordinator',
+        UserRole.faculty => 'Faculty',
+        UserRole.student => 'Student',
+      };
+
+  bool get isStaff => this != UserRole.student;
+
+  /// Event Builder + Report Generator access (coordinators: own events only).
+  bool get canBuildEvents => this == UserRole.hod || this == UserRole.coordinator;
 }
 
 @freezed
-class PrivacySettings with _$PrivacySettings {
+abstract class PrivacySettings with _$PrivacySettings {
   const factory PrivacySettings({
     @Default(true) bool publicBio,
     @Default(true) bool publicGithub,
@@ -42,7 +41,7 @@ class PrivacySettings with _$PrivacySettings {
 }
 
 @freezed
-class NotificationSettings with _$NotificationSettings {
+abstract class NotificationSettings with _$NotificationSettings {
   const factory NotificationSettings({
     @Default(true) bool eventsEnabled,
     @Default(true) bool updatesEnabled,
@@ -59,7 +58,7 @@ abstract class UserDoc with _$UserDoc {
     @Default('') String email,
     @Default('') String usn,
     @Default('') String fullName,
-    @Default(UserRole.student) UserRole role,
+    @JsonKey(unknownEnumValue: UserRole.student) @Default(UserRole.student) UserRole role,
     @Default(false) bool profileComplete,
     String? phone,
     String? yearOfStudy,
@@ -86,29 +85,30 @@ abstract class UserDoc with _$UserDoc {
 
   factory UserDoc.fromJson(Map<String, dynamic> json) => _$UserDocFromJson(json);
 }
+
+extension UserDocX on UserDoc {
+  String get initials {
+    final parts = fullName.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty);
+    final letters = parts.take(2).map((p) => p[0]).join().toUpperCase();
+    return letters.isEmpty ? '?' : letters;
+  }
+}
+
 class DateTimeConverter implements JsonConverter<DateTime?, dynamic> {
   const DateTimeConverter();
 
   @override
   DateTime? fromJson(dynamic json) {
     if (json == null) return null;
-    if (json is Timestamp) {
-      return json.toDate();
-    }
+    if (json is Timestamp) return json.toDate();
     if (json is Map<String, dynamic> && json['_seconds'] != null) {
       return DateTime.fromMillisecondsSinceEpoch(json['_seconds'] * 1000);
     }
-    if (json is String) {
-      return DateTime.parse(json);
-    }
-    // Fallback if the timestamp is already a DateTime (e.g. from local cache)
+    if (json is String) return DateTime.tryParse(json);
     if (json is DateTime) return json;
-    return DateTime.now();
+    return null;
   }
 
   @override
-  dynamic toJson(DateTime? object) {
-    if (object == null) return null;
-    return object.toIso8601String();
-  }
+  dynamic toJson(DateTime? object) => object?.toIso8601String();
 }

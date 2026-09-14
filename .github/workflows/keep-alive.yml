@@ -1,0 +1,20 @@
+# Exists solely to stop Render's free tier from spinning the backend down after
+# 15 min idle (unofficial workaround, spec §8). Remove it if the backend moves
+# to a paid plan. A failed ping fails the job so GitHub emails a notification.
+name: Keep Render awake
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping /api/health
+        run: |
+          curl --fail --silent --show-error \
+            --retry 3 --retry-delay 20 --retry-all-errors --max-time 90 \
+            https://aikya-backend-2t80.onrender.com/api/health

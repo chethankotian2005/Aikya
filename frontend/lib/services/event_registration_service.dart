@@ -84,8 +84,8 @@ class EventRegistrationService {
       // ── Step 5: Write registration + increment counter (atomic) ─────
       final regData = RegistrationDoc(
         studentUid: studentUid,
+        eventId: eventId,
         formResponses: formResponses,
-        registeredAt: DateTime.now(), // Server timestamp applied below
       );
 
       transaction.set(registrationRef, regData.toFirestore());

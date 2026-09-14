@@ -2,53 +2,43 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { 
-  Home, 
-  Calendar, 
-  FolderOpen, 
-  Users, 
-  User 
-} from "lucide-react";
+import { Calendar, FolderOpen, Home, User, Users } from "lucide-react";
+
+const NAV_ITEMS = [
+  { name: "Home", href: "/", icon: Home },
+  { name: "Events", href: "/events", icon: Calendar },
+  { name: "Projects", href: "/projects", icon: FolderOpen },
+  { name: "Alumni", href: "/alumni", icon: Users },
+  { name: "Profile", href: "/profile", icon: User },
+];
 
 export default function BottomNav() {
   const pathname = usePathname();
 
-  const navItems = [
-    { name: "Home", href: "/", icon: Home },
-    { name: "Events", href: "/events", icon: Calendar },
-    { name: "Projects", href: "/projects", icon: FolderOpen },
-    { name: "Alumni", href: "/alumni", icon: Users },
-    { name: "Profile", href: "/profile", icon: User },
-  ];
-
   return (
-    <div className="fixed bottom-0 left-0 right-0 bg-surface-elevated border-t border-border z-50 safe-area-bottom pb-env-safe">
-      <div className="flex justify-around items-center h-16 max-w-md mx-auto">
-        {navItems.map((item) => {
-          const isActive = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href));
-          const Icon = item.icon;
-          
+    <nav
+      aria-label="Main"
+      className="pb-safe fixed right-0 bottom-0 left-0 z-50 border-t border-border bg-surface-elevated"
+    >
+      <div className="mx-auto flex h-16 max-w-md items-center justify-around">
+        {NAV_ITEMS.map(({ name, href, icon: Icon }) => {
+          const isActive = pathname === href || (href !== "/" && pathname.startsWith(href));
           return (
             <Link
-              key={item.name}
-              href={item.href}
-              className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors ${
+              key={name}
+              href={href}
+              aria-current={isActive ? "page" : undefined}
+              className={`relative flex h-full w-full flex-col items-center justify-center gap-1 transition-colors ${
                 isActive ? "text-accent" : "text-text-tertiary hover:text-text-secondary"
               }`}
             >
-              <Icon 
-                size={22} 
-                strokeWidth={isActive ? 2.5 : 2} 
-                fill={isActive ? "currentColor" : "none"} 
-                className={isActive ? "text-accent" : ""}
-              />
-              <span className={`text-[10px] ${isActive ? "font-semibold" : "font-medium"}`}>
-                {item.name}
-              </span>
+              {isActive && <span className="absolute top-0 h-0.5 w-8 rounded-full bg-accent" aria-hidden />}
+              <Icon size={22} strokeWidth={isActive ? 2.5 : 2} aria-hidden />
+              <span className={`text-[10px] ${isActive ? "font-semibold" : "font-medium"}`}>{name}</span>
             </Link>
           );
         })}
       </div>
-    </div>
+    </nav>
   );
 }

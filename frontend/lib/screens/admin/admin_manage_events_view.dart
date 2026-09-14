@@ -1,52 +1,138 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../core/theme/app_tokens.dart';
 
-class AdminManageEventsView extends StatelessWidget {
+import '../../core/theme/app_tokens.dart';
+import '../../features/auth/data/user_doc.dart';
+import '../../models/firestore/event_doc.dart';
+import '../../services/firebase_service.dart';
+import '../../utils/friendly_error.dart';
+import '../../widgets/shared_widgets.dart';
+import '../events_hub_screen.dart' show formatEventDate;
+
+/// Events the caller can manage: the HOD sees all, coordinators their own.
+final manageableEventsProvider = StreamProvider.autoDispose<List<EventDoc>>((ref) {
+  final user = ref.watch(currentUserDocProvider).valueOrNull;
+  if (user == null) return Stream.value(const []);
+
+  final query = user.role == UserRole.hod
+      ? EventDoc.collection.orderBy('eventDate', descending: true).limit(100)
+      : EventDoc.collection
+          .where('createdBy', isEqualTo: user.uid)
+          .orderBy('eventDate', descending: true)
+          .limit(100);
+
+  return query.snapshots().map((snap) => snap.docs.map(EventDoc.fromFirestore).toList());
+});
+
+class AdminManageEventsView extends ConsumerWidget {
   const AdminManageEventsView({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final events = ref.watch(manageableEventsProvider);
+
     return Scaffold(
-      backgroundColor: AppColors.primarySurface,
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.event_busy_rounded, size: 64, color: AppColors.textTertiary),
-            const SizedBox(height: 16),
-            Text(
-              'No upcoming events scheduled.',
-              style: GoogleFonts.poppins(
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-                color: AppColors.textSecondary,
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => context.push('/admin/events/new'),
+        backgroundColor: AppColors.secondary,
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.add_rounded),
+        label: const Text('New event'),
+      ),
+      body: events.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => EmptyState(icon: Icons.error_outline, message: friendlyError(e)),
+        data: (list) => list.isEmpty
+            ? const EmptyState(
+                icon: Icons.event_busy_rounded,
+                message: 'No events yet. Create one to start accepting registrations.',
+              )
+            : ListView.separated(
+                padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
+                itemCount: list.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 12),
+                itemBuilder: (_, i) => _EventRow(event: list[i]),
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Create an event to start accepting registrations.',
-              style: GoogleFonts.poppins(
-                fontSize: 14,
-                color: AppColors.textTertiary,
+      ),
+    );
+  }
+}
+
+class _EventRow extends StatelessWidget {
+  final EventDoc event;
+  const _EventRow({required this.event});
+
+  Future<void> _delete(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete event?'),
+        content: Text('"${event.title}" and its registration count will be removed.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: AppColors.error),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await EventDoc.docRef(event.id).delete();
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(friendlyError(e)), backgroundColor: AppColors.error),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        contentPadding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+        onTap: () => context.push('/events/${event.id}'),
+        title: Text(event.title, style: GoogleFonts.poppins(fontWeight: FontWeight.w700)),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text(formatEventDate(event.eventDate), style: GoogleFonts.poppins(fontSize: 12)),
+              TagChip(
+                label: event.isPast ? 'Past' : 'Upcoming',
+                color: event.isPast ? AppColors.textTertiary : AppColors.success,
               ),
-            ),
-            const SizedBox(height: 32),
-            ElevatedButton.icon(
-              onPressed: () {
-                Navigator.of(context).pushNamed('/create_event');
-              },
-              icon: const Icon(Icons.add_rounded),
-              label: Text(
-                'Create New Event',
-                style: GoogleFonts.poppins(fontWeight: FontWeight.w700),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.accent,
-                foregroundColor: AppColors.primary,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-              ),
-            ),
+              TagChip(label: '${event.filledSeats}/${event.totalSeats} seats', color: AppColors.secondary),
+              if (event.reportMarkdown != null) const AiBadge(label: 'Report ready'),
+            ],
+          ),
+        ),
+        trailing: PopupMenuButton<String>(
+          tooltip: 'Event actions',
+          onSelected: (action) {
+            switch (action) {
+              case 'edit':
+                context.push('/admin/events/edit/${event.id}');
+              case 'report':
+                context.push('/admin/report', extra: event.id);
+              case 'delete':
+                _delete(context);
+            }
+          },
+          itemBuilder: (_) => [
+            const PopupMenuItem(value: 'edit', child: Text('Edit')),
+            const PopupMenuItem(value: 'report', child: Text('Generate report')),
+            const PopupMenuItem(value: 'delete', child: Text('Delete')),
           ],
         ),
       ),

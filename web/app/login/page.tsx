@@ -1,21 +1,27 @@
 "use client";
 
 import { useState } from "react";
-import { signInWithEmailAndPassword, updatePassword } from "firebase/auth";
-import { auth, db } from "@/lib/firebase/firebase";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
-import { useRouter } from "next/navigation";
 import Image from "next/image";
+import Link from "next/link";
+import { signInWithEmailAndPassword } from "firebase/auth";
+import { auth } from "@/lib/firebase/firebase";
+import { friendlyError } from "@/lib/errors";
+import PasswordInput from "@/components/PasswordInput";
+import { ErrorText } from "@/components/ui";
+
+type LoginRole = "student" | "faculty";
+
+const toEmail = (id: string, role: LoginRole) => {
+  const sanitized = id.trim().toLowerCase().replace(/\s+/g, "");
+  return role === "faculty" ? `${sanitized}@aikya.internal` : `${sanitized}@aikya.smvitm.edu`;
+};
 
 export default function LoginPage() {
-  const router = useRouter();
-  const [role, setRole] = useState<"student" | "faculty">("student");
+  const [role, setRole] = useState<LoginRole>("student");
   const [idValue, setIdValue] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [needsReset, setNeedsReset] = useState(false);
-  const [newPassword, setNewPassword] = useState("");
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,200 +29,97 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      let loginEmail = idValue;
-      
-      // Faculty logic
-      if (role === "faculty") {
-        const sanitizedId = idValue.trim().toLowerCase().replace(/\s+/g, '');
-        loginEmail = `${sanitizedId}@aikya.internal`;
-      } 
-      // Student logic (USN to Email)
-      else if (role === "student") {
-        const sanitizedUsn = idValue.trim().toLowerCase().replace(/\s+/g, '');
-        loginEmail = `${sanitizedUsn}@aikya.smvitm.edu`;
-      }
+      const credential = await signInWithEmailAndPassword(auth, toEmail(idValue, role), password);
+      const idToken = await credential.user.getIdToken();
 
-      const userCredential = await signInWithEmailAndPassword(auth, loginEmail, password);
-      
-      if (role === "faculty") {
-        const userDoc = await getDoc(doc(db, "users", userCredential.user.uid));
-        if (userDoc.exists() && userDoc.data()?.needsPasswordReset) {
-          setNeedsReset(true);
-          setLoading(false);
-          return;
-        }
-      }
-
-      await finalizeLogin(userCredential.user);
-    } catch (err: any) {
-      setError(err.message || "Failed to login");
-      setLoading(false);
-    }
-  };
-
-  const handleResetSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-    setLoading(true);
-
-    try {
-      if (!auth.currentUser) throw new Error("No user found");
-      
-      await updatePassword(auth.currentUser, newPassword);
-      await updateDoc(doc(db, "users", auth.currentUser.uid), {
-        needsPasswordReset: false
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idToken }),
       });
-      
-      await finalizeLogin(auth.currentUser);
-    } catch (err: any) {
-      setError(err.message || "Failed to reset password");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Could not start your session. Please try again.");
+      }
+
+      // Full navigation so the server layout routes to setup / password reset / home.
+      window.location.href = "/";
+    } catch (err) {
+      setError(friendlyError(err));
       setLoading(false);
     }
   };
 
-  const finalizeLogin = async (user: any) => {
-    // Get Firebase ID Token
-    const idToken = await user.getIdToken();
-    
-    // Call our API route to set the secure session cookie
-    const res = await fetch("/api/login", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ idToken }),
-    });
-
-    if (res.ok) {
-      router.push("/");
-      router.refresh();
-    } else {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.error || "Failed to create session");
-    }
+  const switchRole = (next: LoginRole) => {
+    setRole(next);
+    setIdValue("");
+    setPassword("");
+    setError("");
   };
-
-  if (needsReset) {
-    return (
-      <div className="min-h-screen bg-primary-surface flex items-center justify-center p-4">
-        <div className="bg-surface-elevated max-w-md w-full p-8 rounded-xl shadow-lg border border-border">
-          <h2 className="text-2xl font-semibold text-text-primary mb-2">Update Password</h2>
-          <p className="text-text-secondary text-sm mb-6">
-            For security reasons, you must change your default password before accessing your account.
-          </p>
-          <form onSubmit={handleResetSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1">New Password</label>
-              <input
-                type="password"
-                className="w-full px-3 py-2 border border-border rounded-lg bg-primary-surface focus:outline-none focus:ring-2 focus:ring-accent"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                required
-                minLength={6}
-              />
-            </div>
-            {error && <p className="text-error text-sm">{error}</p>}
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-secondary hover:bg-accent-hover text-on-primary py-2.5 rounded-lg font-medium transition-colors"
-            >
-              {loading ? "Updating..." : "Update Password & Login"}
-            </button>
-          </form>
-        </div>
-      </div>
-    );
-  }
 
   return (
-    <div className="min-h-screen bg-primary-surface flex flex-col items-center justify-center p-4 relative overflow-hidden">
-      {/* Decorative Wave Overlay */}
-      <div className="absolute inset-0 bg-wave-motif pointer-events-none" />
-      
-      <div className="bg-surface-elevated max-w-md w-full p-8 rounded-xl shadow-lg border border-border z-10 relative">
-        
-        <div className="flex flex-col items-center mb-6">
-          <Image 
-            src="/aikya_logo_cropped.png" 
-            alt="Aikya Logo" 
-            width={160} 
-            height={80} 
-            className="mb-4 object-contain"
-          />
-          <h1 className="text-2xl font-bold text-text-primary mb-2">Welcome to AIKYA</h1>
-          <p className="text-text-secondary text-sm text-center">
+    <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-primary-surface p-4">
+      <div className="pointer-events-none absolute inset-0 bg-wave-motif" />
+
+      <div className="card relative z-10 w-full max-w-md p-8">
+        <div className="mb-6 flex flex-col items-center">
+          <Image src="/aikya_logo_cropped.png" alt="Aikya logo" width={160} height={80} className="mb-4 object-contain" priority />
+          <h1 className="mb-2 text-2xl font-bold text-text-primary">Welcome to AIKYA</h1>
+          <p className="text-center text-sm text-text-secondary">
             {role === "student" ? "Login with your USN to continue" : "Login with your Faculty ID to continue"}
           </p>
         </div>
 
-        {/* Segmented Control */}
-        <div className="flex p-1 bg-primary-container rounded-lg mb-8">
-          <button
-            type="button"
-            className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${role === "student" ? "bg-surface-elevated shadow-sm text-text-primary" : "text-text-secondary hover:text-text-primary"}`}
-            onClick={() => setRole("student")}
-          >
-            Student
-          </button>
-          <button
-            type="button"
-            className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${role === "faculty" ? "bg-surface-elevated shadow-sm text-text-primary" : "text-text-secondary hover:text-text-primary"}`}
-            onClick={() => setRole("faculty")}
-          >
-            Faculty
-          </button>
+        <div role="tablist" aria-label="Account type" className="mb-8 flex rounded-full bg-primary-container p-1">
+          {(["student", "faculty"] as const).map((r) => (
+            <button
+              key={r}
+              type="button"
+              role="tab"
+              aria-selected={role === r}
+              onClick={() => switchRole(r)}
+              className={`flex-1 rounded-full py-2 text-sm font-medium transition-colors ${
+                role === r ? "bg-surface-elevated text-text-primary shadow-sm" : "text-text-secondary hover:text-text-primary"
+              }`}
+            >
+              {r === "student" ? "Student" : "Faculty"}
+            </button>
+          ))}
         </div>
 
         <form onSubmit={handleLogin} className="space-y-5">
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">
+            <label htmlFor="login-id" className="label">
               {role === "student" ? "USN" : "Faculty ID"}
             </label>
             <input
+              id="login-id"
               type="text"
-              className="w-full px-4 py-2.5 border border-border rounded-lg bg-primary-surface focus:outline-none focus:ring-2 focus:ring-accent"
+              className="input"
               value={idValue}
               onChange={(e) => setIdValue(e.target.value)}
-              placeholder={role === "student" ? "e.g. 4MW20CS001" : "e.g. 0544"}
+              placeholder={role === "student" ? "e.g. 4MW21AI042" : "e.g. 0544"}
+              autoComplete="username"
+              autoCapitalize={role === "student" ? "characters" : "none"}
               required
             />
           </div>
-          <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Password</label>
-            <input
-              type="password"
-              className="w-full px-4 py-2.5 border border-border rounded-lg bg-primary-surface focus:outline-none focus:ring-2 focus:ring-accent"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </div>
-          
-          {error && <p className="text-error text-sm font-medium">{error}</p>}
-          
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-secondary hover:bg-accent-hover text-on-primary py-3 mt-2 rounded-lg font-medium transition-colors flex justify-center items-center"
-          >
-            {loading ? (
-              <svg className="animate-spin h-5 w-5 text-on-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-            ) : (
-              "Login"
-            )}
+          <PasswordInput label="Password" value={password} onChange={setPassword} />
+
+          <ErrorText message={error} />
+
+          <button type="submit" disabled={loading} className="btn-primary mt-2 w-full py-3">
+            {loading ? "Signing in…" : "Login"}
           </button>
         </form>
 
         {role === "student" && (
-          <div className="mt-8 text-center text-sm">
-            <span className="text-text-secondary">New User? </span>
-            <a href="/signup" className="text-accent font-bold hover:underline">Sign Up</a>
-          </div>
+          <p className="mt-8 text-center text-sm text-text-secondary">
+            New User?{" "}
+            <Link href="/signup" className="font-bold text-secondary hover:underline">
+              Sign Up
+            </Link>
+          </p>
         )}
       </div>
     </div>

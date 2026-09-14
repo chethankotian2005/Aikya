@@ -1,33 +1,38 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'firestore_value.dart';
+
 /// Firestore document model for `events/{eventId}/registrations/{studentUid}`.
 ///
-/// The document ID is the student's UID, which gives us the unique-registration
-/// constraint for free — a second write to the same doc ID would overwrite,
-/// so the [EventRegistrationService] uses a transaction with exists-check.
+/// The doc ID is the student's UID (uniqueness for free). `studentUid` and
+/// `eventId` are also stored as fields for the "My registrations" query.
 class RegistrationDoc {
   final String studentUid;
+  final String eventId;
   final Map<String, dynamic> formResponses;
-  final DateTime registeredAt;
+  final DateTime? registeredAt;
 
   const RegistrationDoc({
     required this.studentUid,
+    required this.eventId,
     required this.formResponses,
-    required this.registeredAt,
+    this.registeredAt,
   });
 
-  factory RegistrationDoc.fromFirestore(
-      DocumentSnapshot<Map<String, dynamic>> doc) {
-    final data = doc.data()!;
+  factory RegistrationDoc.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final data = doc.data() ?? const {};
     return RegistrationDoc(
       studentUid: doc.id,
+      eventId: data['eventId'] as String? ?? doc.reference.parent.parent?.id ?? '',
       formResponses: Map<String, dynamic>.from(data['formResponses'] ?? {}),
-      registeredAt: (data['registeredAt'] as Timestamp).toDate(),
+      registeredAt: toDateTime(data['registeredAt']),
     );
   }
 
   Map<String, dynamic> toFirestore() {
     return {
+      'studentUid': studentUid,
+      'eventId': eventId,
       'formResponses': formResponses,
       'registeredAt': FieldValue.serverTimestamp(),
     };

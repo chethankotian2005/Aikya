@@ -1,18 +1,16 @@
 /**
  * Authentication middleware — verifies Firebase ID tokens.
  *
- * NEVER trusts a client-sent role. The role is always looked up from
- * Firestore `users/{uid}` after the token is verified.
+ * NEVER trusts a client-sent role or token claim. The role is always looked
+ * up from Firestore `users/{uid}` after the token is verified.
  *
  * Attaches to `req`:
- *   - req.uid     — Firebase Auth UID
- *   - req.email   — user email from token
- *   - req.role    — role string from Firestore (hod, event_faculty, etc.)
+ *   - req.uid, req.email
+ *   - req.role         — student | faculty | coordinator | hod
+ *   - req.userName, req.designation, req.club
  *
  * Usage:
- *   import { verifyAuth, requireRole } from '../middleware/verifyAuth.js';
- *
- *   router.post('/endpoint', verifyAuth, requireRole('hod', 'event_faculty'), handler);
+ *   router.post('/endpoint', verifyAuth, requireRole('hod', 'coordinator'), handler);
  */
 
 import admin from 'firebase-admin';
@@ -24,10 +22,6 @@ function getDb() {
   return _db;
 }
 
-/**
- * Verify the Firebase ID token from the Authorization header.
- * Looks up the user's role from Firestore — never from the token or client.
- */
 export async function verifyAuth(req, res, next) {
   const authHeader = req.headers.authorization;
 
@@ -40,12 +34,10 @@ export async function verifyAuth(req, res, next) {
   const idToken = authHeader.split('Bearer ')[1];
 
   try {
-    // Verify the Firebase ID token
     const decoded = await admin.auth().verifyIdToken(idToken);
     req.uid = decoded.uid;
     req.email = decoded.email;
 
-    // Look up role from Firestore — NEVER trust client-sent role
     const userDoc = await getDb().collection('users').doc(decoded.uid).get();
 
     if (!userDoc.exists) {
@@ -54,8 +46,11 @@ export async function verifyAuth(req, res, next) {
       });
     }
 
-    req.role = userDoc.data().role;
-    req.userName = userDoc.data().fullName;
+    const data = userDoc.data();
+    req.role = data.role;
+    req.userName = data.fullName;
+    req.designation = data.designation || null;
+    req.club = data.club || null;
     next();
   } catch (err) {
     console.error('Auth verification failed:', err.code || err.message);
@@ -72,11 +67,7 @@ export async function verifyAuth(req, res, next) {
 }
 
 /**
- * Role-gate factory — returns middleware that checks if req.role is in
- * the allowed list. Must be used AFTER verifyAuth.
- *
- * @param  {...string} allowedRoles  e.g. 'hod', 'event_faculty'
- * @returns {Function} Express middleware
+ * Role-gate factory — must be used AFTER verifyAuth.
  */
 export function requireRole(...allowedRoles) {
   return (req, res, next) => {
@@ -86,7 +77,7 @@ export function requireRole(...allowedRoles) {
 
     if (!allowedRoles.includes(req.role)) {
       return res.status(403).json({
-        error: `Access denied. Required role: ${allowedRoles.join(' or ')}. Your role: ${req.role}`,
+        error: `Access denied. Required role: ${allowedRoles.join(' or ')}.`,
       });
     }
 

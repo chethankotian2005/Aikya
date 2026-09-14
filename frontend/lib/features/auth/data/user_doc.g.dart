@@ -48,7 +48,12 @@ _UserDoc _$UserDocFromJson(Map<String, dynamic> json) => _UserDoc(
   usn: json['usn'] as String? ?? '',
   fullName: json['fullName'] as String? ?? '',
   role:
-      $enumDecodeNullable(_$UserRoleEnumMap, json['role']) ?? UserRole.student,
+      $enumDecodeNullable(
+        _$UserRoleEnumMap,
+        json['role'],
+        unknownValue: UserRole.student,
+      ) ??
+      UserRole.student,
   profileComplete: json['profileComplete'] as bool? ?? false,
   phone: json['phone'] as String?,
   yearOfStudy: json['yearOfStudy'] as String?,
@@ -117,6 +122,5 @@ const _$UserRoleEnumMap = {
   UserRole.hod: 'hod',
   UserRole.coordinator: 'coordinator',
   UserRole.faculty: 'faculty',
-  UserRole.assistant: 'assistant',
   UserRole.student: 'student',
 };

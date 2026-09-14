@@ -1,136 +1,131 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
-import { ArrowLeft, Search, MapPin, Handshake, ChevronRight, GraduationCap } from "lucide-react";
+import { collection } from "firebase/firestore";
+import { BadgeCheck, Briefcase as Linkedin, GraduationCap, Handshake, MapPin, Search, X } from "lucide-react";
+import { db } from "@/lib/firebase/firebase";
+import { useLiveQuery } from "@/lib/hooks";
+import { toAlumni, type AlumniProfile } from "@/lib/models";
+import { Avatar, EmptyState, PageHeader, PageSpinner } from "@/components/ui";
 
-// Dummy data
-const dummyAlumni = [
-  {
-    id: "a1",
-    name: "Vikram R.",
-    initials: "VR",
-    jobTitle: "Senior ML Engineer",
-    company: "Google",
-    graduationYear: "2020",
-    location: "Bengaluru, India",
-    isOpenForMentorship: true,
-  },
-  {
-    id: "a2",
-    name: "Anjali M.",
-    initials: "AM",
-    jobTitle: "Data Scientist",
-    company: "Amazon",
-    graduationYear: "2021",
-    location: "Hyderabad, India",
-    isOpenForMentorship: false,
-  },
-  {
-    id: "a3",
-    name: "Rohit K.",
-    initials: "RK",
-    jobTitle: "AI Researcher",
-    company: "Microsoft",
-    graduationYear: "2019",
-    location: "Seattle, USA",
-    isOpenForMentorship: true,
-  }
-];
-
-export default function AlumniScreen() {
-  const [searchQuery, setSearchQuery] = useState("");
-
-  const filteredAlumni = dummyAlumni.filter(a => 
-    a.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    a.company.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    a.jobTitle.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
+/** Solid accent pill — deliberately high-contrast so mentors stand out. */
+function MentorBadge() {
   return (
-    <div className="flex flex-col min-h-screen bg-primary-surface pb-16">
-      {/* ─── App Bar ─── */}
-      <header className="px-5 pt-5 flex items-center gap-4">
-        <Link 
-          href="/" 
-          className="w-10 h-10 rounded-lg bg-surface-elevated border border-border flex items-center justify-center text-text-secondary hover:bg-primary-container transition"
-        >
-          <ArrowLeft size={20} />
-        </Link>
-        <h1 className="text-xl font-bold text-text-primary tracking-tight">Alumni Network</h1>
-      </header>
-
-      {/* ─── Search Bar ─── */}
-      <div className="px-5 py-4">
-        <div className="relative">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <Search size={18} className="text-text-tertiary" />
-          </div>
-          <input
-            type="text"
-            className="w-full h-11 pl-10 bg-surface-elevated border border-border rounded-lg text-[13px] text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent"
-            placeholder="Search by name, role, or company..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
-      </div>
-
-      {/* ─── Alumni List ─── */}
-      <div className="px-5 pb-10 flex flex-col gap-4">
-        {filteredAlumni.length === 0 ? (
-          <div className="py-10 flex flex-col items-center justify-center text-text-tertiary">
-            <GraduationCap size={48} className="mb-4 opacity-50" />
-            <p className="text-sm">No alumni found</p>
-          </div>
-        ) : (
-          filteredAlumni.map(alumni => (
-            <AlumniCard key={alumni.id} alumni={alumni} />
-          ))
-        )}
-      </div>
-    </div>
+    <span className="inline-flex items-center gap-1 rounded-full bg-accent px-2.5 py-1 text-[11px] font-bold text-white">
+      <Handshake size={13} aria-hidden /> Open to mentor
+    </span>
   );
 }
 
-function AlumniCard({ alumni }: { alumni: any }) {
+const roleLine = (a: AlumniProfile) =>
+  a.jobTitle && a.currentCompany ? `${a.jobTitle} @ ${a.currentCompany}` : a.jobTitle || a.currentCompany;
+
+export default function AlumniPage() {
+  const alumni = useLiveQuery(() => collection(db, "alumniProfiles"), toAlumni, []);
+  const [search, setSearch] = useState("");
+  const [mentorsOnly, setMentorsOnly] = useState(false);
+  const [selected, setSelected] = useState<AlumniProfile | null>(null);
+
+  const q = search.trim().toLowerCase();
+  const visible = alumni.data
+    .filter((a) => !mentorsOnly || a.isOpenForMentorship)
+    .filter((a) => !q || [a.fullName, a.currentCompany, a.jobTitle, a.location].some((v) => v.toLowerCase().includes(q)))
+    .sort((a, b) => (b.graduationYear ?? 0) - (a.graduationYear ?? 0));
+
   return (
-    <div className="rounded-xl bg-surface-elevated border border-border p-4 shadow-sm hover:border-accent/50 transition cursor-pointer">
-      <div className="flex items-start gap-4">
-        {/* Avatar */}
-        <div className="w-14 h-14 shrink-0 rounded-full bg-ai-badge-gradient flex items-center justify-center shadow-sm mt-1">
-          <span className="text-white font-bold text-lg">{alumni.initials}</span>
+    <div className="flex flex-col">
+      <PageHeader title="Alumni Network" />
+      <div className="flex flex-col gap-3 px-5 py-4">
+        <div className="relative">
+          <Search size={18} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-text-tertiary" aria-hidden />
+          <input type="search" aria-label="Search alumni" className="input pl-10" placeholder="Search by name, role, company or city..." value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
-
-        {/* Details */}
-        <div className="flex-1 min-w-0">
-          <div className="flex justify-between items-start">
-            <h4 className="text-[16px] font-bold text-text-primary truncate pr-2">{alumni.name}</h4>
-            <ChevronRight size={18} className="text-text-tertiary shrink-0 mt-0.5" />
-          </div>
-          
-          <p className="text-[13px] font-semibold text-text-secondary mt-0.5 truncate">
-            {alumni.jobTitle} @ {alumni.company}
-          </p>
-          
-          <p className="text-[11px] text-text-tertiary mt-1">
-            Batch of {alumni.graduationYear}
-          </p>
-
-          <div className="flex flex-wrap gap-2 mt-3">
-            {alumni.isOpenForMentorship && (
-              <div className="px-2 py-1 bg-accent/10 border border-accent/20 rounded text-[10px] font-bold text-accent flex items-center gap-1">
-                <Handshake size={12} />
-                Open to Mentor
-              </div>
-            )}
-            <div className="px-2 py-1 bg-primary-container rounded text-[10px] font-medium text-text-secondary flex items-center gap-1">
-              <MapPin size={12} />
-              {alumni.location}
-            </div>
-          </div>
-        </div>
+        <button
+          type="button"
+          aria-pressed={mentorsOnly}
+          onClick={() => setMentorsOnly((v) => !v)}
+          className={`flex items-center gap-2 self-start rounded-full border px-4 py-1.5 text-xs font-semibold transition ${
+            mentorsOnly ? "border-accent bg-accent text-white" : "border-border bg-surface-elevated text-text-secondary"
+          }`}
+        >
+          <Handshake size={14} aria-hidden /> Open to mentor
+        </button>
       </div>
+
+      <div className="flex flex-col gap-4 px-5 pb-8">
+        {alumni.loading ? (
+          <PageSpinner />
+        ) : visible.length === 0 ? (
+          <EmptyState icon={GraduationCap} message={alumni.error || (alumni.data.length === 0 ? "No alumni profiles yet." : "No alumni match your search.")} />
+        ) : (
+          visible.map((a) => (
+            <button
+              key={a.uid}
+              type="button"
+              onClick={() => setSelected(a)}
+              className={`card flex items-start gap-4 p-4 text-left transition hover:border-accent/50 ${a.isOpenForMentorship ? "border-accent/50" : ""}`}
+            >
+              <Avatar name={a.fullName} size={52} />
+              <div className="min-w-0 flex-1">
+                <h3 className="flex items-center gap-1 truncate text-[16px] font-bold text-text-primary">
+                  {a.fullName}
+                  {a.verifiedByHod && <BadgeCheck size={16} className="shrink-0 text-accent" aria-label="Verified by HOD" />}
+                </h3>
+                {roleLine(a) && <p className="mt-0.5 truncate text-[13px] font-semibold text-text-secondary">{roleLine(a)}</p>}
+                <p className="mt-1 text-[11px] text-text-tertiary">
+                  {[a.graduationYear && `Batch of ${a.graduationYear}`, a.location].filter(Boolean).join(" · ")}
+                </p>
+                {a.isOpenForMentorship && (
+                  <div className="mt-2">
+                    <MentorBadge />
+                  </div>
+                )}
+              </div>
+            </button>
+          ))
+        )}
+      </div>
+
+      {selected && (
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 sm:items-center" onClick={() => setSelected(null)}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={selected.fullName}
+            className="w-full max-w-lg rounded-t-2xl bg-surface-elevated p-6 sm:rounded-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-4">
+              <Avatar name={selected.fullName} size={64} />
+              <div className="flex-1">
+                <h2 className="text-xl font-extrabold text-text-primary">{selected.fullName}</h2>
+                {roleLine(selected) && <p className="text-sm text-text-secondary">{roleLine(selected)}</p>}
+                {selected.graduationYear && <p className="text-xs text-text-tertiary">Batch of {selected.graduationYear}</p>}
+              </div>
+              <button type="button" aria-label="Close" onClick={() => setSelected(null)} className="text-text-tertiary hover:text-text-primary">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {selected.isOpenForMentorship && <MentorBadge />}
+              {selected.location && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-primary-container px-2.5 py-1 text-[11px] text-text-secondary">
+                  <MapPin size={12} aria-hidden /> {selected.location}
+                </span>
+              )}
+            </div>
+            {selected.bio && <p className="mt-4 text-sm leading-relaxed text-text-secondary">{selected.bio}</p>}
+            {selected.linkedinUrl ? (
+              <a href={selected.linkedinUrl} target="_blank" rel="noopener noreferrer" className="btn-primary mt-6 w-full">
+                <Linkedin size={18} aria-hidden />
+                {selected.isOpenForMentorship ? "Ask for mentorship on LinkedIn" : "Connect on LinkedIn"}
+              </a>
+            ) : (
+              <p className="mt-6 text-center text-xs text-text-tertiary">No LinkedIn profile shared.</p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

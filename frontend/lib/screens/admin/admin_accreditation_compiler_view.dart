@@ -1,541 +1,184 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../core/theme/app_tokens.dart';
+import 'package:url_launcher/url_launcher.dart';
 
-class AdminAccreditationCompilerView extends StatefulWidget {
+import '../../core/theme/app_tokens.dart';
+import '../../models/firestore/event_doc.dart';
+import '../../models/firestore/firestore_value.dart';
+import '../../services/render_api_service.dart';
+import '../../utils/friendly_error.dart';
+import '../../widgets/shared_widgets.dart';
+import '../events_hub_screen.dart' show formatEventDate;
+
+final _pastEventsProvider = StreamProvider.autoDispose<List<EventDoc>>((ref) {
+  return EventDoc.collection
+      .where('eventDate', isLessThan: Timestamp.now())
+      .orderBy('eventDate', descending: true)
+      .limit(100)
+      .snapshots()
+      .map((snap) => snap.docs.map(EventDoc.fromFirestore).toList());
+});
+
+final _reportsProvider = StreamProvider.autoDispose<List<Map<String, dynamic>>>((ref) {
+  return FirebaseFirestore.instance
+      .collection('accreditationReports')
+      .orderBy('generatedAt', descending: true)
+      .limit(20)
+      .snapshots()
+      .map((snap) => snap.docs.map((d) => {...d.data(), 'id': d.id}).toList());
+});
+
+String _defaultSemester() {
+  final now = DateTime.now();
+  return now.month >= 7 ? '${now.year} Odd Semester' : '${now.year} Even Semester';
+}
+
+/// HOD-only Accreditation Compiler: pick past events, Gemini compiles them
+/// (with each event's generated report) into one PDF via POST /api/compile-accreditation.
+class AdminAccreditationCompilerView extends ConsumerStatefulWidget {
   const AdminAccreditationCompilerView({super.key});
 
   @override
-  State<AdminAccreditationCompilerView> createState() => _AdminAccreditationCompilerViewState();
+  ConsumerState<AdminAccreditationCompilerView> createState() => _AdminAccreditationCompilerViewState();
 }
 
-class _AdminAccreditationCompilerViewState extends State<AdminAccreditationCompilerView> {
-  String _selectedSemester = 'Even Semester 2026';
-  
-  // Mock data for available reports
-  final List<Map<String, dynamic>> _reports = [
-    {'id': '1', 'name': 'Introduction to GenAI & RAG', 'date': 'Sep 15, 2026', 'pages': 4, 'selected': true},
-    {'id': '2', 'name': 'Alumni Talk: Career Paths in ML', 'date': 'Aug 22, 2026', 'pages': 3, 'selected': true},
-    {'id': '3', 'name': 'Neural Hack 2026 (Day 1)', 'date': 'Aug 10, 2026', 'pages': 8, 'selected': false},
-    {'id': '4', 'name': 'Neural Hack 2026 (Day 2)', 'date': 'Aug 11, 2026', 'pages': 6, 'selected': false},
-    {'id': '5', 'name': 'Faculty Development Prog. on AI', 'date': 'Jul 05, 2026', 'pages': 5, 'selected': false},
-  ];
+class _AdminAccreditationCompilerViewState extends ConsumerState<AdminAccreditationCompilerView> {
+  final _semesterController = TextEditingController(text: _defaultSemester());
+  final Set<String> _selected = {};
+  bool _compiling = false;
 
-  bool _isCompiling = false;
-  bool _isCompiled = false;
-
-  int get _selectedCount => _reports.where((r) => r['selected']).length;
-  int get _totalPages => _reports.where((r) => r['selected']).fold(0, (sum, item) => sum + (item['pages'] as int)) + 2; // +2 for cover and index
-
-  void _compileReport() async {
-    if (_selectedCount == 0) return;
-    
-    setState(() => _isCompiling = true);
-    await Future.delayed(const Duration(seconds: 2)); // Fake compile time
-    
-    if (mounted) {
-      setState(() {
-        _isCompiling = false;
-        _isCompiled = true;
-      });
-    }
+  @override
+  void dispose() {
+    _semesterController.dispose();
+    super.dispose();
   }
 
-  void _reset() {
-    setState(() {
-      _isCompiled = false;
-    });
+  Future<void> _compile() async {
+    if (_selected.isEmpty || _semesterController.text.trim().isEmpty) return;
+
+    setState(() => _compiling = true);
+    try {
+      final result = await ref.read(renderApiServiceProvider).compileAccreditation(
+            semesterLabel: _semesterController.text.trim(),
+            eventIds: _selected.toList(),
+          );
+      if (!mounted) return;
+      final url = result['pdfUrl'] as String?;
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Accreditation report ready'),
+          content: Text('Compiled ${result['eventCount']} events into a PDF.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+            if (url != null)
+              ElevatedButton(
+                onPressed: () => launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
+                child: const Text('Open PDF'),
+              ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(friendlyError(e)), backgroundColor: AppColors.error),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _compiling = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      // Use a more muted, formal background color compared to the rest of the app
-      backgroundColor: const Color(0xFFF3F4F6),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final isLargeScreen = constraints.maxWidth > 800;
+    final events = ref.watch(_pastEventsProvider);
+    final reports = ref.watch(_reportsProvider).valueOrNull ?? const [];
 
-          if (isLargeScreen) {
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  flex: 5,
-                  child: _buildConfigurationPanel(),
-                ),
-                Expanded(
-                  flex: 7,
-                  child: _buildPreviewPanel(),
-                ),
-              ],
-            );
-          }
-
-          // Mobile View
-          return ListView(
-            padding: EdgeInsets.zero,
-            children: [
-              _buildConfigurationPanel(),
-              _buildPreviewPanel(),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  // ─── Configuration Panel ──────────────────────────────────────────
-  Widget _buildConfigurationPanel() {
-    return Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(right: BorderSide(color: Color(0xFFE5E7EB))),
-      ),
-      child: ListView(
-        padding: const EdgeInsets.all(24),
-        children: [
-          Text(
-            'Report Configuration',
-            style: GoogleFonts.poppins(
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
-              color: const Color(0xFF111827),
-              letterSpacing: -0.5,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Select period and compile formal documentation for NAAC/NBA.',
-            style: GoogleFonts.poppins(
-              fontSize: 13,
-              color: const Color(0xFF6B7280),
-            ),
-          ),
-          const SizedBox(height: 32),
-          
-          // Semester Picker
-          Text(
-            'Academic Period',
-            style: GoogleFonts.poppins(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: const Color(0xFF374151),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF9FAFB),
-              border: Border.all(color: const Color(0xFFD1D5DB)),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  _selectedSemester,
-                  style: GoogleFonts.poppins(color: const Color(0xFF111827), fontWeight: FontWeight.w500),
-                ),
-                const Icon(Icons.calendar_today_rounded, size: 16, color: Color(0xFF6B7280)),
-              ],
-            ),
-          ),
-          
-          const SizedBox(height: 32),
-          
-          // Multi-select List
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Approved Activity Reports',
-                style: GoogleFonts.poppins(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: const Color(0xFF374151),
-                ),
-              ),
-              Text(
-                '$_selectedCount Selected',
-                style: GoogleFonts.poppins(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.primary,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Container(
-            decoration: BoxDecoration(
-              border: Border.all(color: const Color(0xFFE5E7EB)),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Column(
-              children: _reports.map((report) {
-                final isSelected = report['selected'] as bool;
-                return InkWell(
-                  onTap: () {
-                    setState(() {
-                      report['selected'] = !isSelected;
-                    });
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    decoration: BoxDecoration(
-                      border: Border(
-                        bottom: BorderSide(
-                          color: report == _reports.last ? Colors.transparent : const Color(0xFFF3F4F6),
-                        ),
-                      ),
-                      color: isSelected ? const Color(0xFFF0FDF4) : Colors.white,
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          isSelected ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
-                          color: isSelected ? const Color(0xFF16A34A) : const Color(0xFFD1D5DB),
-                          size: 20,
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                report['name'],
-                                style: GoogleFonts.poppins(
-                                  fontSize: 14,
-                                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                                  color: const Color(0xFF111827),
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                '${report['date']} · ${report['pages']} Pages',
-                                style: GoogleFonts.poppins(
-                                  fontSize: 12,
-                                  color: const Color(0xFF6B7280),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        // Verified badge
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFDCFCE7),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            'APPROVED',
-                            style: GoogleFonts.poppins(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w700,
-                              color: const Color(0xFF16A34A),
-                              letterSpacing: 0.5,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              }).toList(),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ─── Preview Panel ────────────────────────────────────────────────
-  Widget _buildPreviewPanel() {
-    return Container(
-      color: const Color(0xFFF3F4F6),
-      padding: const EdgeInsets.all(32),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                _isCompiled ? 'Compilation Successful' : 'Live Document Preview',
-                style: GoogleFonts.poppins(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: const Color(0xFF374151),
-                ),
-              ),
-              if (_isCompiled)
-                TextButton.icon(
-                  onPressed: _reset,
-                  icon: const Icon(Icons.refresh_rounded, size: 16),
-                  label: const Text('New Compilation'),
-                  style: TextButton.styleFrom(foregroundColor: const Color(0xFF6B7280)),
-                )
-              else
-                Text(
-                  '$_totalPages Est. Pages',
-                  style: GoogleFonts.poppins(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: const Color(0xFF6B7280),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 24),
-          Expanded(
-            child: _isCompiled ? _buildSuccessState() : _buildLivePreviewDocument(),
-          ),
-          const SizedBox(height: 24),
-          if (!_isCompiled)
-            SizedBox(
-              height: 56,
-              child: ElevatedButton(
-                onPressed: _selectedCount == 0 || _isCompiling ? null : _compileReport,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF111827),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                ),
-                child: _isCompiling
-                    ? const SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation<Color>(Colors.white)),
-                      )
-                    : Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.account_balance_rounded, size: 18),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Compile NAAC/NBA Report',
-                            style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600),
-                          ),
-                        ],
-                      ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLivePreviewDocument() {
-    final selectedReports = _reports.where((r) => r['selected']).toList();
-
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(4),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x1A000000),
-            blurRadius: 10,
-            offset: Offset(0, 4),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.all(48),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Center(
-            child: Column(
-              children: [
-                Text(
-                  'SMVITM',
-                  style: GoogleFonts.lora(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.black,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Department of Artificial Intelligence & Machine Learning',
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: const Color(0xFF4B5563),
-                  ),
-                ),
-                const SizedBox(height: 24),
-                Container(width: 40, height: 2, color: Colors.black),
-                const SizedBox(height: 24),
-                Text(
-                  'CONSOLIDATED ACTIVITY REPORT',
-                  style: GoogleFonts.poppins(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.black,
-                    letterSpacing: 1,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  _selectedSemester.toUpperCase(),
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    color: const Color(0xFF6B7280),
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 48),
-          Text(
-            'TABLE OF CONTENTS',
-            style: GoogleFonts.poppins(
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-              color: Colors.black,
-              letterSpacing: 1,
-            ),
-          ),
-          const SizedBox(height: 16),
-          const Divider(color: Colors.black12, height: 1),
-          const SizedBox(height: 16),
-          if (selectedReports.isEmpty)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.all(32.0),
-                child: Text(
-                  'Select reports from the left panel to populate the index.',
-                  style: GoogleFonts.poppins(color: const Color(0xFF9CA3AF), fontStyle: FontStyle.italic),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            )
-          else
-            Expanded(
-              child: ListView.builder(
-                itemCount: selectedReports.length,
-                itemBuilder: (context, index) {
-                  final r = selectedReports[index];
-                  // Calculate mock starting page number
-                  int startPage = 3;
-                  for (int i = 0; i < index; i++) {
-                    startPage += selectedReports[i]['pages'] as int;
-                  }
-                  
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 12.0),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          '${index + 1}. ',
-                          style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: Colors.black87),
-                        ),
-                        Expanded(
-                          child: Text(
-                            r['name'],
-                            style: GoogleFonts.poppins(color: Colors.black87),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        Expanded(
-                          child: Container(
-                            margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: const BoxDecoration(
-                              border: Border(bottom: BorderSide(color: Colors.black12, style: BorderStyle.solid)),
-                            ),
-                          ),
-                        ),
-                        Text(
-                          startPage.toString().padLeft(2, '0'),
-                          style: GoogleFonts.robotoMono(color: Colors.black54),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSuccessState() {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
+    return ListView(
+      padding: const EdgeInsets.all(20),
       children: [
-        Container(
-          width: 120,
-          height: 160,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(4),
-            boxShadow: const [
-              BoxShadow(color: Color(0x1A000000), blurRadius: 10, offset: Offset(0, 4)),
-            ],
-            border: Border.all(color: const Color(0xFFE5E7EB)),
-          ),
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.picture_as_pdf_rounded, size: 48, color: Color(0xFFEF4444)),
-                const SizedBox(height: 8),
-                Text('PDF', style: GoogleFonts.poppins(fontWeight: FontWeight.w700, color: const Color(0xFF9CA3AF))),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 32),
-        Text(
-          'Compilation Complete',
-          style: GoogleFonts.poppins(
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-            color: const Color(0xFF111827),
-          ),
+        Row(
+          children: [
+            Text('Accreditation Compiler', style: GoogleFonts.poppins(fontSize: 22, fontWeight: FontWeight.w800)),
+            const SizedBox(width: 8),
+            const AiBadge(),
+          ],
         ),
         const SizedBox(height: 8),
         Text(
-          'Generated $_totalPages pages spanning $_selectedCount verified events.',
-          style: GoogleFonts.poppins(color: const Color(0xFF6B7280)),
+          'Select past events to compile into one NAAC/NBA-ready PDF. Events with a generated report give Gemini more to work with.',
+          style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary),
         ),
-        const SizedBox(height: 32),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            OutlinedButton.icon(
-              onPressed: () {},
-              icon: const Icon(Icons.share_rounded, size: 18),
-              label: const Text('Share with HOD'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFF111827),
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                side: const BorderSide(color: Color(0xFFD1D5DB)),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+        const SizedBox(height: 20),
+        TextField(
+          controller: _semesterController,
+          decoration: const InputDecoration(labelText: 'Academic period'),
+        ),
+        const SizedBox(height: 16),
+        events.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => EmptyState(icon: Icons.error_outline, message: friendlyError(e)),
+          data: (list) => list.isEmpty
+              ? const EmptyState(icon: Icons.event_busy_rounded, message: 'No past events to compile yet.')
+              : Card(
+                  child: Column(
+                    children: [
+                      CheckboxListTile(
+                        title: Text('Select all (${list.length})', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                        value: _selected.length == list.length,
+                        onChanged: (v) => setState(() {
+                          _selected.clear();
+                          if (v == true) _selected.addAll(list.map((e) => e.id));
+                        }),
+                      ),
+                      const Divider(height: 1),
+                      for (final e in list)
+                        CheckboxListTile(
+                          value: _selected.contains(e.id),
+                          onChanged: (v) => setState(() => v == true ? _selected.add(e.id) : _selected.remove(e.id)),
+                          title: Text(e.title),
+                          subtitle: Text(
+                            '${formatEventDate(e.eventDate)} · ${e.filledSeats} registered'
+                            '${e.reportMarkdown != null ? ' · report ready' : ''}',
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+        ),
+        const SizedBox(height: 20),
+        ElevatedButton.icon(
+          onPressed: _compiling || _selected.isEmpty ? null : _compile,
+          style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
+          icon: _compiling
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : const Icon(Icons.auto_awesome_rounded),
+          label: Text(_compiling ? 'Compiling… (up to a minute)' : 'Compile ${_selected.length} events'),
+        ),
+        if (reports.isNotEmpty) ...[
+          const SizedBox(height: 32),
+          Text('Previous reports', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          for (final r in reports)
+            Card(
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                leading: const Icon(Icons.picture_as_pdf_rounded, color: AppColors.error),
+                title: Text(r['semesterLabel'] as String? ?? 'Report'),
+                subtitle: Text(
+                  '${(r['includedEventIds'] as List?)?.length ?? 0} events'
+                  '${toDateTime(r['generatedAt']) != null ? ' · ${formatEventDate(toDateTime(r['generatedAt'])!)}' : ''}',
+                ),
+                trailing: const Icon(Icons.open_in_new_rounded),
+                onTap: r['pdfUrl'] is String
+                    ? () => launchUrl(Uri.parse(r['pdfUrl'] as String), mode: LaunchMode.externalApplication)
+                    : null,
               ),
             ),
-            const SizedBox(width: 16),
-            ElevatedButton.icon(
-              onPressed: () {},
-              icon: const Icon(Icons.download_rounded, size: 18),
-              label: const Text('Download PDF'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF16A34A),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-              ),
-            ),
-          ],
-        ),
+        ],
       ],
     );
   }

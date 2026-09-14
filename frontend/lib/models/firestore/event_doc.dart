@@ -1,9 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../event_model.dart';
+import 'firestore_value.dart';
+
 /// Firestore document model for `events/{eventId}`.
 ///
-/// The `currentRegistrations` field is atomically incremented via a
-/// Firestore transaction in [EventRegistrationService].
+/// `currentRegistrations` only moves together with a registration doc write
+/// (see [EventRegistrationService] and the isJoining/isLeaving rules).
 class EventDoc {
   final String id;
   final String title;
@@ -14,11 +17,14 @@ class EventDoc {
   final int maxCapacity;
   final int currentRegistrations;
   final DateTime registrationDeadline;
-  final Map<String, dynamic> customFormSchema;
+  final List<RegistrationField> formFields;
   final String tag;
+  final String? club;
   final String? bannerUrl;
   final String createdBy;
-  final DateTime createdAt;
+  final DateTime? createdAt;
+  final String? reportMarkdown;
+  final Map<String, int>? sentimentPercentages;
 
   const EventDoc({
     required this.id,
@@ -30,59 +36,84 @@ class EventDoc {
     required this.maxCapacity,
     this.currentRegistrations = 0,
     required this.registrationDeadline,
-    this.customFormSchema = const {},
-    required this.tag,
+    this.formFields = const [],
+    this.tag = 'General',
+    this.club,
     this.bannerUrl,
     required this.createdBy,
-    required this.createdAt,
+    this.createdAt,
+    this.reportMarkdown,
+    this.sentimentPercentages,
   });
 
   bool get isFull => currentRegistrations >= maxCapacity;
-  bool get isPast => eventDate.isBefore(DateTime.now());
+  bool get isPast => (endDate ?? eventDate).isBefore(DateTime.now());
   bool get isRegistrationOpen =>
-      !isFull &&
-      !isPast &&
-      DateTime.now().isBefore(registrationDeadline);
-  int get seatsRemaining => maxCapacity - currentRegistrations;
-  double get fillRatio =>
-      maxCapacity > 0 ? currentRegistrations / maxCapacity : 0;
+      !isFull && !isPast && DateTime.now().isBefore(registrationDeadline);
+  int get seatsRemaining => (maxCapacity - currentRegistrations).clamp(0, maxCapacity);
+  double get fillRatio => maxCapacity > 0 ? currentRegistrations / maxCapacity : 0;
+  bool get isNearCapacity => fillRatio >= 0.8 && !isFull;
+  int get filledSeats => currentRegistrations;
+  int get totalSeats => maxCapacity;
 
-  factory EventDoc.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
-    final data = doc.data()!;
+  factory EventDoc.fromMap(String id, Map<String, dynamic> data) {
+    final eventDate = toDateTime(data['eventDate']) ?? DateTime.now();
+    final sentiment = data['sentiment'];
+    final percentages = sentiment is Map ? sentiment['percentages'] : null;
+
     return EventDoc(
-      id: doc.id,
-      title: data['title'] as String,
-      description: data['description'] as String,
-      venue: data['venue'] as String,
-      eventDate: (data['eventDate'] as Timestamp).toDate(),
-      endDate: data['endDate'] != null
-          ? (data['endDate'] as Timestamp).toDate()
-          : null,
-      maxCapacity: data['maxCapacity'] as int,
-      currentRegistrations: data['currentRegistrations'] as int? ?? 0,
-      registrationDeadline:
-          (data['registrationDeadline'] as Timestamp).toDate(),
-      customFormSchema:
-          Map<String, dynamic>.from(data['customFormSchema'] ?? {}),
-      tag: data['tag'] as String? ?? '',
+      id: id,
+      title: data['title'] as String? ?? 'Untitled event',
+      description: data['description'] as String? ?? '',
+      venue: data['venue'] as String? ?? '',
+      eventDate: eventDate,
+      endDate: toDateTime(data['endDate']),
+      maxCapacity: (data['maxCapacity'] as num?)?.toInt() ?? 0,
+      currentRegistrations: (data['currentRegistrations'] as num?)?.toInt() ?? 0,
+      registrationDeadline: toDateTime(data['registrationDeadline']) ?? eventDate,
+      formFields: RegistrationField.listFromSchema(data['customFormSchema']),
+      tag: data['tag'] as String? ?? 'General',
+      club: data['club'] as String?,
       bannerUrl: data['bannerUrl'] as String?,
-      createdBy: data['createdBy'] as String,
-      createdAt: (data['createdAt'] as Timestamp).toDate(),
+      createdBy: data['createdBy'] as String? ?? '',
+      createdAt: toDateTime(data['createdAt']),
+      reportMarkdown: data['report'] is Map ? data['report']['markdown'] as String? : null,
+      sentimentPercentages: percentages is Map
+          ? percentages.map((k, v) => MapEntry(k as String, (v as num).toInt()))
+          : null,
     );
   }
 
-  Map<String, dynamic> toFirestore() {
+  factory EventDoc.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) =>
+      EventDoc.fromMap(doc.id, doc.data() ?? const {});
+
+  /// Payload for a new event — satisfies the `events` create rule.
+  static Map<String, dynamic> newEventData({
+    required String title,
+    required String description,
+    required String venue,
+    required DateTime eventDate,
+    DateTime? endDate,
+    required int maxCapacity,
+    required DateTime registrationDeadline,
+    required List<RegistrationField> formFields,
+    required String tag,
+    String? club,
+    String? bannerUrl,
+    required String createdBy,
+  }) {
     return {
       'title': title,
       'description': description,
       'venue': venue,
       'eventDate': Timestamp.fromDate(eventDate),
-      'endDate': endDate != null ? Timestamp.fromDate(endDate!) : null,
+      'endDate': endDate != null ? Timestamp.fromDate(endDate) : null,
       'maxCapacity': maxCapacity,
-      'currentRegistrations': currentRegistrations,
+      'currentRegistrations': 0,
       'registrationDeadline': Timestamp.fromDate(registrationDeadline),
-      'customFormSchema': customFormSchema,
+      'customFormSchema': {'fields': formFields.map((f) => f.toMap()).toList()},
       'tag': tag,
+      'club': club,
       'bannerUrl': bannerUrl,
       'createdBy': createdBy,
       'createdAt': FieldValue.serverTimestamp(),
@@ -95,13 +126,9 @@ class EventDoc {
   static DocumentReference<Map<String, dynamic>> docRef(String eventId) =>
       collection.doc(eventId);
 
-  /// Reference to the registrations subcollection for this event.
-  static CollectionReference<Map<String, dynamic>> registrationsRef(
-          String eventId) =>
+  static CollectionReference<Map<String, dynamic>> registrationsRef(String eventId) =>
       collection.doc(eventId).collection('registrations');
 
-  /// Reference to the comments subcollection for this event.
-  static CollectionReference<Map<String, dynamic>> commentsRef(
-          String eventId) =>
+  static CollectionReference<Map<String, dynamic>> commentsRef(String eventId) =>
       collection.doc(eventId).collection('comments');
 }

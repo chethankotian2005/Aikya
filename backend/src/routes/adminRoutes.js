@@ -1,95 +1,107 @@
+/**
+ * POST /api/admin/provision-staff — HOD only.
+ *
+ * Body: { staff: [ { facultyId, fullName, designation?, role: 'faculty'|'coordinator', club? } ] }
+ *
+ * Creates `{facultyId}@aikya.internal` Auth accounts with the default password
+ * `{facultyId}@ml` and `mustResetPassword: true`, plus the users/{uid} doc.
+ * Existing staff accounts are updated in place (password untouched).
+ */
+
 import express from 'express';
 import admin from 'firebase-admin';
+import { verifyAuth, requireRole } from '../middleware/verifyAuth.js';
 
 const router = express.Router();
 
-// Middleware to verify the user is HOD
-// In a real scenario, you'd use a verifyToken middleware first
-const verifyHod = async (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Unauthorized: Missing or invalid token' });
+export const CLUBS = ['Aikya', 'IEEE', 'ISTE', 'Co-curricular', 'Extra-curricular'];
+const STAFF_ROLES = ['faculty', 'coordinator'];
+const MAX_BATCH = 100;
+
+function validate(person) {
+  const facultyId = typeof person?.facultyId === 'string' ? person.facultyId.trim() : '';
+  const fullName = typeof person?.fullName === 'string' ? person.fullName.trim() : '';
+  const { role, club } = person || {};
+
+  if (!/^[A-Za-z0-9]{3,20}$/.test(facultyId)) {
+    return { error: 'Faculty ID must be 3–20 letters or digits.' };
+  }
+  if (!fullName) return { error: 'Full name is required.' };
+  if (!STAFF_ROLES.includes(role)) return { error: 'Role must be faculty or coordinator.' };
+  if (role === 'coordinator' && !CLUBS.includes(club)) {
+    return { error: `Coordinators need a club: ${CLUBS.join(', ')}.` };
   }
 
-  const idToken = authHeader.split('Bearer ')[1];
-  try {
-    const decodedToken = await admin.auth().verifyIdToken(idToken);
-    if (decodedToken.role !== 'hod') {
-      return res.status(403).json({ error: 'Forbidden: Requires HOD role' });
-    }
-    req.user = decodedToken;
-    next();
-  } catch (error) {
-    console.error('Error verifying HOD token:', error);
-    return res.status(401).json({ error: 'Unauthorized: Token verification failed' });
-  }
-};
+  return {
+    facultyId,
+    fullName,
+    role,
+    club: role === 'coordinator' ? club : null,
+    designation: typeof person.designation === 'string' ? person.designation.trim() : '',
+  };
+}
 
-/**
- * POST /api/admin/provision-staff
- * Body: { staff: [ { facultyId, fullName, designation, role, club? } ] }
- */
-router.post('/provision-staff', verifyHod, async (req, res) => {
+router.post('/provision-staff', verifyAuth, requireRole('hod'), async (req, res) => {
   const { staff } = req.body;
 
-  if (!Array.isArray(staff)) {
-    return res.status(400).json({ error: 'Invalid request body, expected staff array' });
+  if (!Array.isArray(staff) || staff.length === 0 || staff.length > MAX_BATCH) {
+    return res.status(400).json({ error: `Expected a "staff" array of 1–${MAX_BATCH} entries.` });
   }
 
+  const db = admin.firestore();
   const results = [];
   const errors = [];
 
   for (const person of staff) {
-    const { facultyId, fullName, designation, role, club } = person;
-
-    if (!facultyId || !fullName || !role) {
-      errors.push({ facultyId, error: 'Missing required fields' });
+    const entry = validate(person);
+    if (entry.error) {
+      errors.push({ facultyId: person?.facultyId ?? null, error: entry.error });
       continue;
     }
 
-    try {
-      const email = `${facultyId.trim().toLowerCase().replace(/\s/g, '')}@aikya.internal`;
-      const password = `${facultyId}@ml`;
+    const { facultyId, fullName, role, club, designation } = entry;
 
-      // 1. Create the Auth user
+    try {
+      const email = `${facultyId.toLowerCase()}@aikya.internal`;
+
       let userRecord;
+      let created = false;
       try {
-         userRecord = await admin.auth().createUser({
-          email: email,
-          password: password,
+        userRecord = await admin.auth().createUser({
+          email,
+          password: `${facultyId}@ml`,
           displayName: fullName,
         });
+        created = true;
       } catch (authError) {
-        if (authError.code === 'auth/email-already-exists') {
-          userRecord = await admin.auth().getUserByEmail(email);
-        } else {
-          throw authError;
-        }
+        if (authError.code !== 'auth/email-already-exists') throw authError;
+        userRecord = await admin.auth().getUserByEmail(email);
       }
 
-      // 2. Set custom claims for role (and club)
-      const claims = { role };
-      if (club) claims.club = club;
-      await admin.auth().setCustomUserClaims(userRecord.uid, claims);
+      const userRef = db.collection('users').doc(userRecord.uid);
+      const existing = await userRef.get();
+      if (existing.exists && !STAFF_ROLES.includes(existing.data().role)) {
+        errors.push({ facultyId, error: `Account exists with role "${existing.data().role}"; not changed.` });
+        continue;
+      }
 
-      // 3. Write Firestore doc
       const userDoc = {
         uid: userRecord.uid,
-        email: email,
-        facultyId: facultyId,
-        fullName: fullName,
-        role: role,
-        mustResetPassword: true,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        profileComplete: true, // They are staff, skip profile setup for now
+        email,
+        facultyId,
+        fullName,
+        role,
+        club,
+        designation: designation || null,
+        profileComplete: true,
       };
+      if (created || !existing.exists) {
+        userDoc.mustResetPassword = true;
+        userDoc.createdAt = admin.firestore.FieldValue.serverTimestamp();
+      }
 
-      if (designation) userDoc.designation = designation;
-      if (club) userDoc.club = club;
-
-      await admin.firestore().collection('users').doc(userRecord.uid).set(userDoc, { merge: true });
-
-      results.push({ facultyId, status: 'Success' });
+      await userRef.set(userDoc, { merge: true });
+      results.push({ facultyId, status: created ? 'created' : 'updated' });
     } catch (err) {
       console.error(`Error provisioning ${facultyId}:`, err);
       errors.push({ facultyId, error: err.message });

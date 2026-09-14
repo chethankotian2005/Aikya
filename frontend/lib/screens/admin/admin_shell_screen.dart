@@ -1,279 +1,141 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
+
 import '../../core/theme/app_tokens.dart';
-import '../../services/firebase_service.dart';
 import '../../features/auth/data/user_doc.dart';
+import '../../features/auth/presentation/auth_controller.dart';
+import '../../services/firebase_service.dart';
+import '../../widgets/shared_widgets.dart';
+import 'admin_accreditation_compiler_view.dart';
+import 'admin_analytics_view.dart';
+import 'admin_attendance_requests_view.dart';
+import 'admin_batch_config_view.dart';
 import 'admin_dashboard_view.dart';
 import 'admin_manage_events_view.dart';
-import 'admin_report_generator_view.dart';
-import 'admin_accreditation_compiler_view.dart';
 import 'admin_moderation_queue_view.dart';
-import 'admin_attendance_requests_view.dart';
-import 'admin_analytics_view.dart';
-import 'admin_batch_config_view.dart';
+import 'admin_report_generator_view.dart';
+import 'admin_staff_provisioning_view.dart';
 
-/// The main host shell for Faculty and Admin users.
+class _NavItem {
+  final String title;
+  final IconData icon;
+  final bool hodOnly;
+  final Widget Function() build;
+
+  const _NavItem(this.title, this.icon, this.build, {this.hodOnly = false});
+}
+
+/// Admin portal for coordinators (own events) and the HOD (everything), spec §6.
 class AdminShellScreen extends ConsumerStatefulWidget {
-  const AdminShellScreen({
-    super.key,
-  });
+  const AdminShellScreen({super.key});
 
   @override
   ConsumerState<AdminShellScreen> createState() => _AdminShellScreenState();
 }
 
 class _AdminShellScreenState extends ConsumerState<AdminShellScreen> {
-  int _selectedIndex = 0;
+  int _index = 0;
 
-  final List<String> _titles = [
-    'Dashboard',
-    'Manage Events',
-    'Report Generator',
-    'Accreditation Compiler',
-    'Content Moderation',
-    'Attendance Requests',
-    'Analytics & Insights',
-    'Batch Config',
+  static final _items = [
+    _NavItem('Dashboard', Icons.dashboard_outlined, () => const AdminDashboardView()),
+    _NavItem('Events', Icons.event_outlined, () => const AdminManageEventsView()),
+    _NavItem('Report Generator', Icons.summarize_outlined, () => const AdminReportGeneratorView(embedded: true)),
+    _NavItem('Analytics', Icons.insights_outlined, () => const AdminAnalyticsView()),
+    _NavItem('Accreditation', Icons.verified_outlined, () => const AdminAccreditationCompilerView(), hodOnly: true),
+    _NavItem('Moderation', Icons.shield_outlined, () => const AdminModerationQueueView(), hodOnly: true),
+    _NavItem('Attendance', Icons.fact_check_outlined, () => const AdminAttendanceRequestsView(), hodOnly: true),
+    _NavItem('Batch Config', Icons.tune_rounded, () => const AdminBatchConfigView(), hodOnly: true),
+    _NavItem('Staff', Icons.badge_outlined, () => const AdminStaffProvisioningView(), hodOnly: true),
   ];
 
   @override
   Widget build(BuildContext context) {
-    final user = ref.watch(currentUserDocProvider).value;
-    final role = user?.role;
+    final user = ref.watch(currentUserDocProvider).valueOrNull;
+    if (user == null) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+
+    final items = _items.where((i) => !i.hodOnly || user.role == UserRole.hod).toList();
+    final index = _index.clamp(0, items.length - 1);
 
     return Scaffold(
-      backgroundColor: AppColors.primarySurface,
-      drawer: _buildDrawer(role),
-      appBar: _buildAppBar(role),
-      body: _buildBody(role),
-    );
-  }
-
-  // ─── App Bar ──────────────────────────────────────────────────────
-  PreferredSizeWidget _buildAppBar(UserRole? role) {
-    String roleName = role?.name ?? 'Loading...';
-    if (role == UserRole.hod) roleName = 'HOD';
-
-    return AppBar(
-      backgroundColor: AppColors.primarySurface,
-      elevation: 0,
-      scrolledUnderElevation: 0,
-      centerTitle: false,
-      title: Row(
-        children: [
-          Text(
-            _titles[_selectedIndex],
-            style: GoogleFonts.poppins(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary,
-              letterSpacing: -0.3,
-            ),
-          ),
-          const Spacer(),
-          // Role Tag
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: AppColors.accent.withValues(alpha: 0.15),
-              borderRadius: AppRadius.borderRadiusSm,
-              border: Border.all(color: AppColors.accent.withValues(alpha: 0.3)),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.admin_panel_settings_rounded, size: 14, color: AppColors.accent),
-                const SizedBox(width: 6),
-                Text(
-                  roleName.toUpperCase(),
-                  style: GoogleFonts.poppins(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.accent,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ],
-            ),
+      appBar: AppBar(
+        title: Text(items[index].title),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: Center(child: TagChip(label: user.role.label)),
           ),
         ],
       ),
-      iconTheme: const IconThemeData(color: AppColors.textPrimary),
-    );
-  }
-
-  // ─── Drawer ───────────────────────────────────────────────────────
-  Widget _buildDrawer(UserRole? role) {
-    return Drawer(
-      backgroundColor: AppColors.surfaceElevated,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.horizontal(right: Radius.circular(0)),
-      ),
-      child: SafeArea(
-        child: Column(
-          children: [
-            // Drawer Header
-            Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Row(
-                children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: const BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: AppColors.aiBadgeGradient,
-                    ),
-                    child: const Icon(Icons.hub_rounded, color: Colors.white, size: 20),
-                  ),
-                  const SizedBox(width: 12),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'AIML Hub.',
-                        style: GoogleFonts.poppins(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                      Text(
-                        'Admin Portal',
-                        style: GoogleFonts.poppins(
-                          fontSize: 12,
-                          color: AppColors.textTertiary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const Divider(color: AppColors.border, height: 1),
-            const SizedBox(height: 8),
-            // Navigation Items
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                children: [
-                  _drawerItem(0, Icons.dashboard_outlined, 'Dashboard'),
-                  if (role == UserRole.hod || role == UserRole.coordinator) 
-                    _drawerItem(1, Icons.event_outlined, 'Events'),
-                  if (role == UserRole.hod || role == UserRole.coordinator) 
-                    _drawerItem(2, Icons.summarize_outlined, 'Report Generator'),
-                  if (role == UserRole.hod) 
-                    _drawerItem(3, Icons.verified_outlined, 'Accreditation Compiler'),
-                  if (role == UserRole.hod) 
-                    _drawerItem(4, Icons.shield_outlined, 'Moderation'),
-                  if (role == UserRole.hod) 
-                    _drawerItem(5, Icons.fact_check_outlined, 'Attendance Requests'),
-                  if (role == UserRole.hod) 
-                    _drawerItem(6, Icons.insights_outlined, 'Analytics'),
-                  if (role == UserRole.hod) 
-                    _drawerItem(7, Icons.settings_applications_outlined, 'Batch Config'),
-                ],
-              ),
-            ),
-            // Footer (Logout)
-            const Divider(color: AppColors.border, height: 1),
-            Padding(
-              padding: const EdgeInsets.all(12.0),
-              child: ListTile(
-                leading: const Icon(Icons.logout_rounded, color: AppColors.error),
-                title: Text(
-                  'Sign Out',
-                  style: GoogleFonts.poppins(
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.error,
-                  ),
-                ),
-                shape: RoundedRectangleBorder(borderRadius: AppRadius.borderRadiusSm),
-                onTap: () {
-                  Navigator.of(context).pushReplacementNamed('/login');
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _drawerItem(int index, IconData icon, String title) {
-    final isSelected = _selectedIndex == index;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: ListTile(
-        leading: Icon(
-          icon,
-          color: isSelected ? AppColors.primary : AppColors.textSecondary,
-          size: 22,
-        ),
-        title: Text(
-          title,
-          style: GoogleFonts.poppins(
-            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-            color: isSelected ? AppColors.primary : AppColors.textSecondary,
-            fontSize: 14,
-          ),
-        ),
-        selected: isSelected,
-        selectedTileColor: AppColors.accent,
-        shape: RoundedRectangleBorder(
-          borderRadius: AppRadius.borderRadiusSm,
-        ),
-        onTap: () {
-          setState(() => _selectedIndex = index);
-          Navigator.of(context).pop(); // Close drawer
-        },
-      ),
-    );
-  }
-
-  // ─── Dynamic Body ─────────────────────────────────────────────────
-  Widget _buildBody(UserRole? role) {
-    // Switch between views based on _selectedIndex
-    switch (_selectedIndex) {
-      case 0:
-        return const AdminDashboardView();
-      case 1:
-        if (role == UserRole.hod || role == UserRole.coordinator) return const AdminManageEventsView();
-        return const Center(child: Text('Unauthorized'));
-      case 2:
-        if (role == UserRole.hod || role == UserRole.coordinator) return const AdminReportGeneratorView();
-        return const Center(child: Text('Unauthorized'));
-      case 3:
-        if (role == UserRole.hod) return const AdminAccreditationCompilerView();
-        return const Center(child: Text('Unauthorized'));
-      case 4:
-        if (role == UserRole.hod) return const AdminModerationQueueView();
-        return const Center(child: Text('Unauthorized'));
-      case 5:
-        if (role == UserRole.hod) return const AdminAttendanceRequestsView();
-        return const Center(child: Text('Unauthorized'));
-      case 6:
-        if (role == UserRole.hod) return const AdminAnalyticsView();
-        return const Center(child: Text('Unauthorized'));
-      case 7:
-        if (role == UserRole.hod) return const AdminBatchConfigView();
-        return const Center(child: Text('Unauthorized'));
-      default:
-        return Center(
+      drawer: Drawer(
+        backgroundColor: AppColors.surfaceElevated,
+        child: SafeArea(
           child: Column(
-            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.construction_rounded, size: 48, color: AppColors.textTertiary),
-              const SizedBox(height: 16),
-              Text(
-                '${_titles[_selectedIndex]} is under construction.',
-                style: GoogleFonts.poppins(color: AppColors.textSecondary),
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: Row(
+                  children: [
+                    Image.asset('assets/branding/aikya_logo_cropped.png', height: 44),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('AIKYA', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w800)),
+                          Text(
+                            'Admin Portal · ${user.fullName}',
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textTertiary),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
+              const Divider(height: 1),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.all(12),
+                  children: [
+                    for (var i = 0; i < items.length; i++)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: ListTile(
+                          leading: Icon(items[i].icon),
+                          title: Text(items[i].title),
+                          selected: i == index,
+                          selectedColor: Colors.white,
+                          selectedTileColor: AppColors.secondary,
+                          shape: const StadiumBorder(),
+                          onTap: () {
+                            setState(() => _index = i);
+                            Navigator.of(context).pop();
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.home_outlined),
+                title: const Text('Back to app'),
+                onTap: () => context.go('/home'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.logout_rounded, color: AppColors.error),
+                title: const Text('Sign out', style: TextStyle(color: AppColors.error)),
+                onTap: () => ref.read(authControllerProvider.notifier).logout(),
+              ),
+              const SizedBox(height: 8),
             ],
           ),
-        );
-    }
+        ),
+      ),
+      body: items[index].build(),
+    );
   }
 }

@@ -1,21 +1,23 @@
 "use client";
 
 import { useState } from "react";
-import { createUserWithEmailAndPassword } from "firebase/auth";
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
-import { auth, db } from "@/lib/firebase/firebase";
-import { useRouter } from "next/navigation";
 import Image from "next/image";
-
-const USN_REGEX = /^4MW[0-9]{2}AI[0-9]{3}$/;
+import Link from "next/link";
+import { createUserWithEmailAndPassword, deleteUser } from "firebase/auth";
+import { doc, serverTimestamp, setDoc } from "firebase/firestore";
+import { auth, db } from "@/lib/firebase/firebase";
+import { friendlyError } from "@/lib/errors";
+import { USN_PATTERN } from "@/lib/models";
+import PasswordInput from "@/components/PasswordInput";
+import { ErrorText } from "@/components/ui";
 
 export default function SignupPage() {
-  const router = useRouter();
   const [fullName, setFullName] = useState("");
   const [usn, setUsn] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [agreed, setAgreed] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -23,155 +25,101 @@ export default function SignupPage() {
     e.preventDefault();
     setError("");
 
-    const sanitizedUsn = usn.trim().toUpperCase().replace(/\s+/g, "");
-    if (!USN_REGEX.test(sanitizedUsn)) {
-      setError("Invalid USN format. Expected format: 4MW21AI042");
+    const normalizedUsn = usn.trim().toUpperCase().replace(/\s+/g, "");
+    if (!USN_PATTERN.test(normalizedUsn)) {
+      setError(
+        /^4MW\d{2}[A-Z]{2}\d{3}$/.test(normalizedUsn)
+          ? "AIKYA is for AI & ML department students only."
+          : "Invalid USN — expected e.g. 4MW21AI042.",
+      );
       return;
     }
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters.");
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError("Passwords do not match.");
-      return;
-    }
+    if (password.length < 6) return setError("Password must be at least 6 characters.");
+    if (password !== confirmPassword) return setError("Passwords do not match.");
+    if (!agreed) return setError("Please review and agree to the data collection notice.");
 
     setLoading(true);
     try {
-      const email = `${sanitizedUsn.toLowerCase()}@aikya.smvitm.edu`;
+      const email = `${normalizedUsn.toLowerCase()}@aikya.smvitm.edu`;
+      const credential = await createUserWithEmailAndPassword(auth, email, password);
+      const user = credential.user;
 
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      const uid = userCredential.user.uid;
+      try {
+        await setDoc(doc(db, "users", user.uid), {
+          uid: user.uid,
+          email,
+          usn: normalizedUsn,
+          fullName: fullName.trim(),
+          role: "student",
+          phone: phone.trim() || null,
+          profileComplete: false,
+          mustResetPassword: false,
+          skills: [],
+          createdAt: serverTimestamp(),
+        });
+      } catch (profileError) {
+        // Don't leave an Auth account without a profile — it would block a retry.
+        await deleteUser(user).catch(() => {});
+        throw profileError;
+      }
 
-      await setDoc(doc(db, "users", uid), {
-        email,
-        usn: sanitizedUsn,
-        fullName: fullName.trim(),
-        role: "student",
-        ...(phone.trim() ? { phone: phone.trim() } : {}),
-        createdAt: serverTimestamp(),
-      });
-
-      const idToken = await userCredential.user.getIdToken();
       const res = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ idToken }),
+        body: JSON.stringify({ idToken: await user.getIdToken() }),
       });
+      if (!res.ok) throw new Error("Account created, but we couldn't sign you in. Please log in.");
 
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || "Account created, but failed to sign you in. Please log in.");
-      }
-
-      router.push("/");
-      router.refresh();
-    } catch (err: any) {
-      if (err.code === "auth/email-already-in-use") {
-        setError("This USN is already registered. Please log in instead.");
-      } else {
-        setError(err.message || "Failed to sign up");
-      }
+      window.location.href = "/setup";
+    } catch (err) {
+      setError(friendlyError(err));
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-primary-surface flex flex-col items-center justify-center p-4 relative overflow-hidden">
-      <div className="absolute inset-0 bg-wave-motif pointer-events-none" />
+    <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-primary-surface p-4">
+      <div className="pointer-events-none absolute inset-0 bg-wave-motif" />
 
-      <div className="bg-surface-elevated max-w-md w-full p-8 rounded-xl shadow-lg border border-border z-10 relative">
-        <div className="flex flex-col items-center mb-6">
-          <Image
-            src="/aikya_logo_cropped.png"
-            alt="Aikya Logo"
-            width={160}
-            height={80}
-            className="mb-4 object-contain"
-          />
-          <h1 className="text-2xl font-bold text-text-primary mb-2">Create your account</h1>
-          <p className="text-text-secondary text-sm text-center">Sign up with your USN to get started</p>
+      <div className="card relative z-10 w-full max-w-md p-8">
+        <div className="mb-6 flex flex-col items-center">
+          <Image src="/aikya_logo_cropped.png" alt="Aikya logo" width={160} height={80} className="mb-4 object-contain" priority />
+          <h1 className="mb-2 text-2xl font-bold text-text-primary">Create your account</h1>
+          <p className="text-center text-sm text-text-secondary">Sign up with your USN to get started</p>
         </div>
 
         <form onSubmit={handleSignup} className="space-y-5">
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Full Name</label>
-            <input
-              type="text"
-              className="w-full px-4 py-2.5 border border-border rounded-lg bg-primary-surface focus:outline-none focus:ring-2 focus:ring-accent"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              placeholder="e.g. Jane Doe"
-              required
-            />
+            <label htmlFor="signup-name" className="label">Full Name</label>
+            <input id="signup-name" className="input" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="e.g. Jane Doe" autoComplete="name" required />
           </div>
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">USN</label>
-            <input
-              type="text"
-              className="w-full px-4 py-2.5 border border-border rounded-lg bg-primary-surface focus:outline-none focus:ring-2 focus:ring-accent"
-              value={usn}
-              onChange={(e) => setUsn(e.target.value)}
-              placeholder="e.g. 4MW21AI042"
-              required
-            />
+            <label htmlFor="signup-usn" className="label">USN</label>
+            <input id="signup-usn" className="input" value={usn} onChange={(e) => setUsn(e.target.value)} placeholder="e.g. 4MW21AI042" autoComplete="username" autoCapitalize="characters" required />
           </div>
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Phone (optional)</label>
-            <input
-              type="tel"
-              className="w-full px-4 py-2.5 border border-border rounded-lg bg-primary-surface focus:outline-none focus:ring-2 focus:ring-accent"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="e.g. 9876543210"
-            />
+            <label htmlFor="signup-phone" className="label">Phone (optional)</label>
+            <input id="signup-phone" type="tel" className="input" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="e.g. 9876543210" autoComplete="tel" />
           </div>
-          <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Password</label>
-            <input
-              type="password"
-              className="w-full px-4 py-2.5 border border-border rounded-lg bg-primary-surface focus:outline-none focus:ring-2 focus:ring-accent"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              minLength={6}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Confirm Password</label>
-            <input
-              type="password"
-              className="w-full px-4 py-2.5 border border-border rounded-lg bg-primary-surface focus:outline-none focus:ring-2 focus:ring-accent"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              required
-              minLength={6}
-            />
-          </div>
+          <PasswordInput label="Password" value={password} onChange={setPassword} autoComplete="new-password" minLength={6} />
+          <PasswordInput label="Confirm Password" value={confirmPassword} onChange={setConfirmPassword} autoComplete="new-password" minLength={6} />
 
-          {error && <p className="text-error text-sm font-medium">{error}</p>}
+          <label className="flex items-start gap-3 text-xs leading-relaxed text-text-secondary">
+            <input type="checkbox" className="mt-0.5 h-4 w-4 accent-secondary" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} />
+            I understand that my name, USN, phone, socials and photo are collected for department use and may be visible to faculty and students. Contact the HOD office to request removal.
+          </label>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-secondary hover:bg-accent-hover text-on-primary py-3 mt-2 rounded-lg font-medium transition-colors flex justify-center items-center"
-          >
-            {loading ? (
-              <svg className="animate-spin h-5 w-5 text-on-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-            ) : (
-              "Sign Up"
-            )}
+          <ErrorText message={error} />
+
+          <button type="submit" disabled={loading} className="btn-primary mt-2 w-full py-3">
+            {loading ? "Creating account…" : "Sign Up"}
           </button>
         </form>
 
-        <div className="mt-8 text-center text-sm">
-          <span className="text-text-secondary">Already have an account? </span>
-          <a href="/login" className="text-accent font-bold hover:underline">Login</a>
-        </div>
+        <p className="mt-8 text-center text-sm text-text-secondary">
+          Already have an account?{" "}
+          <Link href="/login" className="font-bold text-secondary hover:underline">Login</Link>
+        </p>
       </div>
     </div>
   );

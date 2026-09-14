@@ -1,20 +1,21 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../features/auth/data/user_doc.dart';
 
-/// Provides the global FirebaseService instance.
+/// Student USNs must match the AI & ML pattern (spec §5), e.g. 4MW21AI042.
+final usnPattern = RegExp(r'^4MW\d{2}AI\d{3}$');
+
 final firebaseServiceProvider = Provider<FirebaseService>((ref) {
   return FirebaseService();
 });
 
-/// Provides the current FirebaseAuth user as a stream.
 final authStateProvider = StreamProvider<User?>((ref) {
   return FirebaseAuth.instance.authStateChanges();
 });
 
-/// Provides the current UserDoc as a stream.
 final currentUserDocProvider = StreamProvider<UserDoc?>((ref) {
   final user = ref.watch(authStateProvider).value;
   if (user == null) return Stream.value(null);
@@ -24,178 +25,101 @@ final currentUserDocProvider = StreamProvider<UserDoc?>((ref) {
       .doc(user.uid)
       .snapshots()
       .map((doc) {
-        if (!doc.exists) return null;
-        try {
-          final data = Map<String, dynamic>.from(doc.data()!);
-          data['uid'] = doc.id; // Ensure uid is always present
-          return UserDoc.fromJson(data);
-        } catch (e, stack) {
-          print('Error parsing UserDoc: $e\n$stack');
-          return null; // Return null so we don't break the stream, but print the error!
-        }
-      });
+    if (!doc.exists) return null;
+    try {
+      return UserDoc.fromJson({...doc.data()!, 'uid': doc.id});
+    } catch (e, stack) {
+      debugPrint('Error parsing UserDoc: $e\n$stack');
+      return null;
+    }
+  });
 });
 
-/// Provides the current user's role by looking up their Firestore document.
-final userRoleProvider = FutureProvider<UserRole?>((ref) async {
-  final user = ref.watch(authStateProvider).value;
-  if (user == null) return null;
-
-  final doc = await FirebaseFirestore.instance
-      .collection('users')
-      .doc(user.uid)
-      .get();
-      
-  if (!doc.exists) return null;
-  final data = doc.data()!;
-  return UserRole.values.byName(data['role'] as String? ?? 'student');
+/// The signed-in user's role, read from their own users/{uid} doc.
+final userRoleProvider = Provider<UserRole?>((ref) {
+  return ref.watch(currentUserDocProvider).valueOrNull?.role;
 });
 
 class FirebaseService {
   final FirebaseAuth auth = FirebaseAuth.instance;
   final FirebaseFirestore firestore = FirebaseFirestore.instance;
 
-  // ── Auth Methods ────────────────────────────────────────────────────────  // Convert USN to dummy email for Firebase Auth
-  String _usnToEmail(String usn) {
-    // Sanitize USN to be safe for email (lowercase, remove spaces)
-    final sanitizedUsn = usn.trim().toLowerCase().replaceAll(' ', '');
-    return '$sanitizedUsn@aikya.smvitm.edu';
+  static String usnToEmail(String usn) =>
+      '${usn.trim().toLowerCase().replaceAll(RegExp(r'\s+'), '')}@aikya.smvitm.edu';
+
+  static String facultyIdToEmail(String facultyId) =>
+      '${facultyId.trim().toLowerCase().replaceAll(RegExp(r'\s+'), '')}@aikya.internal';
+
+  Future<void> signInWithUsnAndPassword(String usn, String password) {
+    return auth.signInWithEmailAndPassword(email: usnToEmail(usn), password: password);
   }
 
-  // Convert Faculty ID to dummy email for Firebase Auth
-  String _facultyIdToEmail(String facultyId) {
-    final sanitizedId = facultyId.trim().toLowerCase().replaceAll(' ', '');
-    return '$sanitizedId@aikya.internal';
-  }
-
-  // --- Auth Methods ---
-  
-  Future<void> signInWithFacultyIdAndPassword(String facultyId, String password) async {
-    try {
-      final email = _facultyIdToEmail(facultyId);
-      await auth.signInWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
-    } catch (e) {
-      rethrow;
-    }
+  Future<void> signInWithFacultyIdAndPassword(String facultyId, String password) {
+    return auth.signInWithEmailAndPassword(email: facultyIdToEmail(facultyId), password: password);
   }
 
   Future<void> updatePasswordAndClearResetFlag(String newPassword) async {
     final user = auth.currentUser;
-    if (user == null) throw Exception('User not authenticated');
+    if (user == null) throw Exception('Please sign in again.');
 
-    try {
-      // 1. Update password in Firebase Auth
-      await user.updatePassword(newPassword);
-
-      // 2. Clear mustResetPassword flag in Firestore
-      await firestore.collection('users').doc(user.uid).update({
-        'mustResetPassword': false,
-      });
-    } catch (e) {
-      rethrow;
-    }
+    await user.updatePassword(newPassword);
+    await firestore.collection('users').doc(user.uid).update({'mustResetPassword': false});
   }
 
-  // --- Auth Methods ---
-  
-  Future<void> signInWithUsnAndPassword(String usn, String password) async {
-    try {
-      final email = _usnToEmail(usn);
-      await auth.signInWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
-    } catch (e) {
-      rethrow;
-    }
-  }
-
+  /// Student self-signup (spec §5). If the profile write is rejected, the new
+  /// Auth account is deleted so the student can retry with the same USN.
   Future<void> signUpWithUsn({
     required String name,
     required String phone,
     required String usn,
     required String password,
   }) async {
+    final normalizedUsn = usn.trim().toUpperCase().replaceAll(RegExp(r'\s+'), '');
+    if (!usnPattern.hasMatch(normalizedUsn)) {
+      throw Exception('Invalid USN format. Expected e.g. 4MW21AI042.');
+    }
+
+    final email = usnToEmail(normalizedUsn);
+    final credential = await auth.createUserWithEmailAndPassword(email: email, password: password);
+    final user = credential.user!;
+
     try {
-      final email = _usnToEmail(usn);
-      
-      // 1. Create the user in Firebase Auth
-      final userCredential = await auth.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
-      
-      final uid = userCredential.user?.uid;
-      if (uid == null) throw Exception('Failed to create user account');
-
-      // 2. Create the UserDoc in Firestore
-      final userDoc = UserDoc(
-        uid: uid,
-        email: email, // We store the dummy email for reference, though USN is what matters
-        usn: usn.trim().toUpperCase(),
-        fullName: name.trim(),
-        role: UserRole.student, // Default role
-        createdAt: DateTime.now(),
-        // Add phone if you extend UserDoc later, currently not in UserDoc schema
-      );
-
-      await firestore.collection('users').doc(uid).set(userDoc.toJson());
-      
+      await firestore.collection('users').doc(user.uid).set({
+        'uid': user.uid,
+        'email': email,
+        'usn': normalizedUsn,
+        'fullName': name.trim(),
+        'role': UserRole.student.firestoreValue,
+        'phone': phone.trim().isEmpty ? null : phone.trim(),
+        'profileComplete': false,
+        'mustResetPassword': false,
+        'skills': <String>[],
+        'createdAt': FieldValue.serverTimestamp(),
+      });
     } catch (e) {
+      await user.delete();
       rethrow;
     }
   }
 
-  Future<UserCredential> signIn(String email, String password) {
-    return auth.signInWithEmailAndPassword(email: email, password: password);
-  }
+  Future<void> signOut() => auth.signOut();
 
-  Future<void> signOut() async {
-    return auth.signOut();
-  }
-
-  Future<UserCredential> signUp(String email, String password, String usn, String fullName) async {
-    // USN regex validation (e.g. 4MW21AI042)
-    final usnRegex = RegExp(r'^4MW[0-9]{2}AI[0-9]{3}$');
-    if (!usnRegex.hasMatch(usn)) {
-      throw Exception('Invalid USN format. Expected format: 4MW21AI042');
-    }
-
-    // 1. Create auth user
-    final cred = await auth.createUserWithEmailAndPassword(email: email, password: password);
-    
-    // 2. Create Firestore doc
-    await firestore.collection('users').doc(cred.user!.uid).set({
-      'email': email,
-      'usn': usn,
-      'fullName': fullName,
-      'role': UserRole.student.name, // Default to student
-      'skills': [],
-      'createdAt': FieldValue.serverTimestamp(),
-    });
-
-    return cred;
-  }
-
-  // --- Directory Methods ---
   Future<List<UserDoc>> getStudentDirectory() async {
-    try {
-      final snapshot = await firestore
-          .collection('users')
-          .where('role', isEqualTo: 'student')
-          .get();
+    final snapshot = await firestore
+        .collection('users')
+        .where('role', isEqualTo: UserRole.student.firestoreValue)
+        .get();
 
-      return snapshot.docs.map((doc) {
-        final data = doc.data();
-        data['uid'] = doc.id;
-        return UserDoc.fromJson(data);
-      }).toList();
-    } catch (e) {
-      print('Error fetching student directory: $e');
-      return [];
-    }
+    return snapshot.docs
+        .map((doc) {
+          try {
+            return UserDoc.fromJson({...doc.data(), 'uid': doc.id});
+          } catch (_) {
+            return null;
+          }
+        })
+        .whereType<UserDoc>()
+        .toList()
+      ..sort((a, b) => a.fullName.compareTo(b.fullName));
   }
 }

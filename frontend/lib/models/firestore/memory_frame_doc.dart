@@ -1,90 +1,91 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'firestore_value.dart';
+
 /// Content moderation status for memory wall uploads.
 enum FrameStatus {
   pending,
   approved,
   rejected;
 
-  String get firestoreValue => name;
-
-  static FrameStatus fromString(String value) {
-    switch (value) {
-      case 'approved':
-        return FrameStatus.approved;
-      case 'rejected':
-        return FrameStatus.rejected;
-      default:
-        return FrameStatus.pending;
-    }
-  }
+  static FrameStatus parse(Object? value) =>
+      FrameStatus.values.firstWhere((s) => s.name == value, orElse: () => FrameStatus.pending);
 }
 
 /// Firestore document model for `memoryFrames/{id}`.
 ///
-/// Students can create; only `hod` and `assistant` can approve/reject.
-/// `likesCount` is incremented atomically via `FieldValue.increment(1)`.
+/// Anyone signed in may upload (always `pending`); only the HOD approves or
+/// rejects, through the backend so the uploader gets a push notification.
 class MemoryFrameDoc {
   final String id;
-  final String uploadedBy;
+  final String uploadedBy; // uid — the rules check this against the caller
+  final String uploaderName;
   final String imageUrl;
   final String caption;
   final String eventName;
-  final String batchYear;
+  final String? eventId;
   final FrameStatus status;
-  final String? approvedBy;
   final int likesCount;
-  final DateTime createdAt;
+  final String? reportMarkdown;
+  final DateTime? createdAt;
 
   const MemoryFrameDoc({
     required this.id,
     required this.uploadedBy,
+    required this.uploaderName,
     required this.imageUrl,
-    required this.caption,
-    required this.eventName,
-    required this.batchYear,
+    this.caption = '',
+    this.eventName = '',
+    this.eventId,
     this.status = FrameStatus.pending,
-    this.approvedBy,
     this.likesCount = 0,
-    required this.createdAt,
+    this.reportMarkdown,
+    this.createdAt,
   });
 
-  bool get isApproved => status == FrameStatus.approved;
-
-  factory MemoryFrameDoc.fromFirestore(
-      DocumentSnapshot<Map<String, dynamic>> doc) {
-    final data = doc.data()!;
+  factory MemoryFrameDoc.fromMap(String id, Map<String, dynamic> data) {
     return MemoryFrameDoc(
-      id: doc.id,
-      uploadedBy: data['uploadedBy'] as String,
-      imageUrl: data['imageUrl'] as String,
-      caption: data['caption'] as String,
-      eventName: data['eventName'] as String,
-      batchYear: data['batchYear'] as String,
-      status: FrameStatus.fromString(data['status'] as String),
-      approvedBy: data['approvedBy'] as String?,
-      likesCount: data['likesCount'] as int? ?? 0,
-      createdAt: (data['createdAt'] as Timestamp).toDate(),
+      id: id,
+      uploadedBy: data['uploadedBy'] as String? ?? '',
+      uploaderName: data['uploaderName'] as String? ?? 'AIKYA member',
+      imageUrl: data['imageUrl'] as String? ?? '',
+      caption: data['caption'] as String? ?? '',
+      eventName: data['eventName'] as String? ?? '',
+      eventId: data['eventId'] as String?,
+      status: FrameStatus.parse(data['status']),
+      likesCount: (data['likesCount'] as num?)?.toInt() ?? 0,
+      reportMarkdown: data['reportMarkdown'] as String?,
+      createdAt: toDateTime(data['createdAt']),
     );
   }
 
-  Map<String, dynamic> toFirestore() {
+  factory MemoryFrameDoc.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) =>
+      MemoryFrameDoc.fromMap(doc.id, doc.data() ?? const {});
+
+  /// Payload for a new upload — satisfies the `memoryFrames` create rule.
+  static Map<String, dynamic> newFrame({
+    required String uploadedBy,
+    required String uploaderName,
+    required String imageUrl,
+    String caption = '',
+    String eventName = '',
+    String? eventId,
+    String? reportMarkdown,
+  }) {
     return {
       'uploadedBy': uploadedBy,
+      'uploaderName': uploaderName,
       'imageUrl': imageUrl,
       'caption': caption,
       'eventName': eventName,
-      'batchYear': batchYear,
-      'status': FrameStatus.pending.firestoreValue,
-      'approvedBy': null,
+      'eventId': eventId,
+      'status': FrameStatus.pending.name,
       'likesCount': 0,
+      'reportMarkdown': reportMarkdown,
       'createdAt': FieldValue.serverTimestamp(),
     };
   }
 
   static CollectionReference<Map<String, dynamic>> get collection =>
       FirebaseFirestore.instance.collection('memoryFrames');
-
-  static DocumentReference<Map<String, dynamic>> docRef(String id) =>
-      collection.doc(id);
 }

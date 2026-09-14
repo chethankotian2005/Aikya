@@ -31,8 +31,6 @@ class AikyaApp extends ConsumerWidget {
     return MaterialApp.router(
       title: 'AIKYA',
       theme: AppTheme.lightTheme,
-      darkTheme: AppTheme.darkTheme,
-      themeMode: ThemeMode.system,
       routerConfig: router,
       debugShowCheckedModeBanner: false,
     );

@@ -1,17 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:uuid/uuid.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
-import '../services/render_api_service.dart';
 
 import '../core/theme/app_tokens.dart';
-import '../models/update_doc.dart';
-import '../services/firebase_service.dart';
 import '../features/auth/data/user_doc.dart';
 import '../services/firebase_service.dart';
+import '../services/render_api_service.dart';
+import '../utils/friendly_error.dart';
 
 class CreateUpdateScreen extends ConsumerStatefulWidget {
   const CreateUpdateScreen({super.key});
@@ -70,47 +65,22 @@ class _CreateUpdateScreenState extends ConsumerState<CreateUpdateScreen> {
     setState(() => _isSubmitting = true);
 
     try {
-      final id = const Uuid().v4();
-      
-      // Determine designation
-      String designation = 'Faculty';
-      if (user.role == UserRole.coordinator) designation = 'Coordinator';
-      if (user.role == UserRole.hod) designation = 'HOD';
-      // Ideally this comes from user doc if stored, but fallback to role string
-
-      final authUser = ref.read(authStateProvider).value;
-      if (authUser == null) throw Exception('No auth user');
-      final idToken = await authUser.getIdToken();
-
-      final response = await http.post(
-        Uri.parse('${RenderApiService.baseUrl}/messaging/updates'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $idToken',
-        },
-        body: jsonEncode({
-          'id': id,
-          'content': _contentController.text.trim(),
-          'deadlineDate': _deadline?.toIso8601String(),
-          'authorId': user.uid,
-          'authorName': user.fullName.isNotEmpty ? user.fullName : 'Faculty Member',
-          'authorDesignation': designation,
-          'club': user.club,
-          'createdAt': DateTime.now().toIso8601String(),
-        }),
-      );
-
-      if (response.statusCode != 200) {
-        throw Exception('Failed to post update: ${response.body}');
-      }
+      // Author, designation and club are filled in server-side from the verified caller.
+      await ref.read(renderApiServiceProvider).postUpdate(
+            content: _contentController.text.trim(),
+            deadlineDate: _deadline,
+          );
 
       if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Update posted')),
+        );
         Navigator.of(context).pop();
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: AppColors.error),
+          SnackBar(content: Text(friendlyError(e)), backgroundColor: AppColors.error),
         );
       }
     } finally {

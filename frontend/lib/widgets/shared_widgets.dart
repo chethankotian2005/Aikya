@@ -1,19 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+
 import '../core/theme/app_tokens.dart';
 
-/// AI-generated content badge — gradient pill with sparkle icon.
-/// Use on any machine-generated content to distinguish from human-entered data.
-///
-/// Surfaces that require this badge:
-/// - Report Generator output
-/// - Accreditation Compiler output
-/// - Sentiment Rollup / Analysis
-/// - Auto-generated event summaries
-/// - Any ML/AI-processed data display
+/// AI-generated content badge — gradient pill (spec §3). Use on every
+/// machine-generated surface: reports, accreditation, sentiment rollups.
 class AiBadge extends StatelessWidget {
   final String label;
-  const AiBadge({super.key, this.label = 'AI Summary'});
+  const AiBadge({super.key, this.label = 'AI'});
 
   @override
   Widget build(BuildContext context) {
@@ -38,6 +33,34 @@ class AiBadge extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Small pill label for event tags, tech stack items and statuses.
+class TagChip extends StatelessWidget {
+  final String label;
+  final Color color;
+
+  const TagChip({super.key, required this.label, this.color = AppColors.accent});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: AppRadius.borderRadiusFull,
+      ),
+      child: Text(
+        label.toUpperCase(),
+        style: GoogleFonts.poppins(
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+          color: color,
+          letterSpacing: 0.4,
+        ),
       ),
     );
   }
@@ -72,26 +95,94 @@ class SectionHeader extends StatelessWidget {
             ),
           ),
           if (actionLabel != null)
-            GestureDetector(
-              onTap: onAction,
+            TextButton(
+              onPressed: onAction,
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     actionLabel!,
-                    style: GoogleFonts.poppins(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.secondary,
-                    ),
+                    style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600),
                   ),
-                  const SizedBox(width: 2),
-                  const Icon(Icons.chevron_right_rounded,
-                      size: 16, color: AppColors.secondary),
+                  const Icon(Icons.chevron_right_rounded, size: 16),
                 ],
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// Screen title row with the back button used by the pushed tab screens.
+class ScreenHeader extends StatelessWidget {
+  final String title;
+  final Widget? trailing;
+
+  const ScreenHeader({super.key, required this.title, this.trailing});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      child: Row(
+        children: [
+          IconButton.outlined(
+            tooltip: 'Back',
+            onPressed: () => context.canPop() ? context.pop() : context.go('/home'),
+            style: IconButton.styleFrom(
+              backgroundColor: AppColors.surfaceElevated,
+              side: const BorderSide(color: AppColors.border),
+              shape: RoundedRectangleBorder(borderRadius: AppRadius.borderRadiusSm),
+            ),
+            icon: const Icon(Icons.arrow_back_rounded, size: 20, color: AppColors.textSecondary),
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Text(
+              title,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.poppins(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textPrimary,
+                letterSpacing: -0.3,
+              ),
+            ),
+          ),
+          ?trailing,
+        ],
+      ),
+    );
+  }
+}
+
+/// Centered icon + message used for empty and error states.
+class EmptyState extends StatelessWidget {
+  final IconData icon;
+  final String message;
+  final Widget? action;
+
+  const EmptyState({super.key, required this.icon, required this.message, this.action});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 48, color: AppColors.textTertiary.withValues(alpha: 0.6)),
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.poppins(fontSize: 14, color: AppColors.textSecondary),
+            ),
+            if (action != null) ...[const SizedBox(height: AppSpacing.base), action!],
+          ],
+        ),
       ),
     );
   }

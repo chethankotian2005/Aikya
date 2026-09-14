@@ -1,224 +1,190 @@
-import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:infinite_scroll_pagination/infinite_scroll_pagination.dart';
 
 import '../core/theme/app_tokens.dart';
-import '../features/events/data/event_doc.dart';
-import '../features/events/data/registration_doc.dart';
-import 'event_detail_screen.dart';
+import '../features/auth/data/user_doc.dart';
+import '../models/firestore/event_doc.dart';
+import '../services/firebase_service.dart';
+import '../utils/friendly_error.dart';
+import '../widgets/banner_image.dart';
+import '../widgets/shared_widgets.dart';
 
-class EventsHubScreen extends StatefulWidget {
+class EventsHubScreen extends ConsumerStatefulWidget {
   const EventsHubScreen({super.key});
 
   @override
-  State<EventsHubScreen> createState() => _EventsHubScreenState();
+  ConsumerState<EventsHubScreen> createState() => _EventsHubScreenState();
 }
 
-class _EventsHubScreenState extends State<EventsHubScreen> {
-  int _selectedSegment = 0; // 0=Upcoming, 1=Past, 2=My Registrations
+class _EventsHubScreenState extends ConsumerState<EventsHubScreen> {
+  static const _pageSize = 15;
+
+  int _segment = 0; // 0 = Upcoming, 1 = Past, 2 = My Registrations (students)
   final _searchController = TextEditingController();
-  String _searchQuery = '';
-  
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final String? _uid = FirebaseAuth.instance.currentUser?.uid;
+  String _query = '';
+  Set<String> _registeredIds = {};
 
-  final PagingController<DocumentSnapshot?, EventDoc> _pagingController =
-      PagingController(firstPageKey: null);
+  final _paging = PagingController<DocumentSnapshot?, EventDoc>(firstPageKey: null);
 
-  final Set<String> _myRegisteredEventIds = {};
-  bool _isLoadingRegistrations = true;
+  String? get _uid => FirebaseAuth.instance.currentUser?.uid;
+
+  Query<Map<String, dynamic>> get _myRegistrationsQuery => FirebaseFirestore.instance
+      .collectionGroup('registrations')
+      .where('studentUid', isEqualTo: _uid)
+      .orderBy('registeredAt', descending: true);
 
   @override
   void initState() {
     super.initState();
-    _fetchMyRegistrations().then((_) {
-      _pagingController.addPageRequestListener((pageKey) {
-        _fetchPage(pageKey);
-      });
-    });
-  }
-
-  Future<void> _fetchMyRegistrations() async {
-    if (_uid == null) {
-      setState(() => _isLoadingRegistrations = false);
-      return;
-    }
-    try {
-      final snap = await _firestore
-          .collectionGroup('registrations')
-          .where('studentUid', isEqualTo: _uid)
-          .get();
-      for (var doc in snap.docs) {
-        final data = doc.data();
-        if (data['eventId'] != null) {
-          _myRegisteredEventIds.add(data['eventId']);
-        }
-      }
-    } catch (e) {
-      debugPrint('Error fetching registrations: $e');
-    } finally {
-      if (mounted) setState(() => _isLoadingRegistrations = false);
-    }
-  }
-
-  Future<void> _fetchPage(DocumentSnapshot? pageKey) async {
-    try {
-      const pageSize = 15;
-      
-      if (_selectedSegment == 2) {
-        // My Registrations
-        if (_uid == null) {
-          _pagingController.appendLastPage([]);
-          return;
-        }
-        
-        Query query = _firestore
-            .collectionGroup('registrations')
-            .where('studentUid', isEqualTo: _uid)
-            .orderBy('registeredAt', descending: true)
-            .limit(pageSize);
-            
-        if (pageKey != null) query = query.startAfterDocument(pageKey);
-        
-        final snap = await query.get();
-        final isLastPage = snap.docs.length < pageSize;
-        
-        List<EventDoc> events = [];
-        for (var doc in snap.docs) {
-          final data = doc.data() as Map<String, dynamic>;
-          final eventId = data['eventId'] as String?;
-          if (eventId != null) {
-            final eventSnap = await _firestore.collection('events').doc(eventId).get();
-            if (eventSnap.exists) {
-              events.add(EventDoc.fromJson({'id': eventSnap.id, ...eventSnap.data()!}));
-            }
-          }
-        }
-        
-        if (isLastPage) {
-          _pagingController.appendLastPage(events);
-        } else {
-          _pagingController.appendPage(events, snap.docs.last);
-        }
-        return;
-      }
-
-      // Upcoming (0) or Past (1)
-      Query query = _firestore.collection('events');
-      
-      if (_searchQuery.isNotEmpty) {
-        // Simple client-side search approximation by pulling everything
-        // For production, use Algolia/Typesense, but we do basic pagination
-        query = query.orderBy('eventDate', descending: _selectedSegment == 1);
-      } else {
-        if (_selectedSegment == 0) {
-          query = query
-              .where('eventDate', isGreaterThanOrEqualTo: DateTime.now())
-              .orderBy('eventDate', descending: false);
-        } else if (_selectedSegment == 1) {
-          query = query
-              .where('eventDate', isLessThan: DateTime.now())
-              .orderBy('eventDate', descending: true);
-        }
-      }
-      
-      query = query.limit(pageSize);
-      if (pageKey != null) query = query.startAfterDocument(pageKey);
-      
-      final snap = await query.get();
-      final isLastPage = snap.docs.length < pageSize;
-      
-      List<EventDoc> events = snap.docs.map((d) {
-        return EventDoc.fromJson({'id': d.id, ...d.data() as Map<String, dynamic>});
-      }).toList();
-      
-      if (_searchQuery.isNotEmpty) {
-        events = events.where((e) {
-          final q = _searchQuery.toLowerCase();
-          return e.title.toLowerCase().contains(q) || e.tag.toLowerCase().contains(q);
-        }).toList();
-      }
-
-      if (isLastPage) {
-        _pagingController.appendLastPage(events);
-      } else {
-        _pagingController.appendPage(events, snap.docs.last);
-      }
-    } catch (error) {
-      _pagingController.error = error;
-    }
-  }
-
-  void _onSegmentChanged(int index) {
-    setState(() => _selectedSegment = index);
-    _pagingController.refresh();
-  }
-
-  void _onSearchChanged(String val) {
-    setState(() => _searchQuery = val);
-    _pagingController.refresh();
+    _paging.addPageRequestListener(_fetchPage);
+    _loadRegistrations();
   }
 
   @override
   void dispose() {
     _searchController.dispose();
-    _pagingController.dispose();
+    _paging.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadRegistrations() async {
+    if (_uid == null) return;
+    try {
+      final snap = await _myRegistrationsQuery.get();
+      if (!mounted) return;
+      setState(() {
+        _registeredIds = snap.docs
+            .map((d) => d.data()['eventId'] as String? ?? d.reference.parent.parent!.id)
+            .toSet();
+      });
+    } catch (e) {
+      debugPrint('Could not load registrations: $e');
+    }
+  }
+
+  Future<void> _fetchPage(DocumentSnapshot? pageKey) async {
+    try {
+      if (_segment == 2) {
+        var query = _myRegistrationsQuery.limit(_pageSize);
+        if (pageKey != null) query = query.startAfterDocument(pageKey);
+        final snap = await query.get();
+
+        final events = <EventDoc>[];
+        for (final reg in snap.docs) {
+          final eventId = reg.data()['eventId'] as String? ?? reg.reference.parent.parent!.id;
+          final eventSnap = await EventDoc.docRef(eventId).get();
+          if (eventSnap.exists) events.add(EventDoc.fromFirestore(eventSnap));
+        }
+        _appendPage(_filter(events), snap.docs.length < _pageSize, snap.docs.lastOrNull);
+        return;
+      }
+
+      final now = Timestamp.now();
+      var query = _segment == 0
+          ? EventDoc.collection.where('eventDate', isGreaterThanOrEqualTo: now).orderBy('eventDate')
+          : EventDoc.collection.where('eventDate', isLessThan: now).orderBy('eventDate', descending: true);
+      query = query.limit(_pageSize);
+      if (pageKey != null) query = query.startAfterDocument(pageKey);
+
+      final snap = await query.get();
+      final events = snap.docs.map(EventDoc.fromFirestore).toList();
+      _appendPage(_filter(events), snap.docs.length < _pageSize, snap.docs.lastOrNull);
+    } catch (error) {
+      _paging.error = error;
+    }
+  }
+
+  void _appendPage(List<EventDoc> events, bool isLast, DocumentSnapshot? lastDoc) {
+    if (isLast || lastDoc == null) {
+      _paging.appendLastPage(events);
+    } else {
+      _paging.appendPage(events, lastDoc);
+    }
+  }
+
+  List<EventDoc> _filter(List<EventDoc> events) {
+    if (_query.isEmpty) return events;
+    final q = _query.toLowerCase();
+    return events
+        .where((e) =>
+            e.title.toLowerCase().contains(q) ||
+            e.tag.toLowerCase().contains(q) ||
+            e.venue.toLowerCase().contains(q))
+        .toList();
+  }
+
+  void _setSegment(int index) {
+    setState(() => _segment = index);
+    _paging.refresh();
+  }
+
+  void _onSearchChanged(String value) {
+    setState(() => _query = value.trim());
+    _paging.refresh();
+  }
+
+  Future<void> _openEvent(EventDoc event) async {
+    await context.push('/events/${event.id}');
+    _loadRegistrations();
   }
 
   @override
   Widget build(BuildContext context) {
+    final isStudent = ref.watch(userRoleProvider) == UserRole.student;
+    final labels = ['Upcoming', 'Past', if (isStudent) 'My Registrations'];
+
     return Scaffold(
-      backgroundColor: AppColors.primarySurface,
       body: SafeArea(
         bottom: false,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildAppBar(),
+            const ScreenHeader(title: 'Events Hub'),
             _buildSearchBar(),
-            _buildSegmentedControl(),
-            Expanded(child: _buildEventList()),
+            _buildSegmentedControl(labels),
+            Expanded(
+              child: RefreshIndicator(
+                onRefresh: () async {
+                  _paging.refresh();
+                  await _loadRegistrations();
+                },
+                child: PagedListView<DocumentSnapshot?, EventDoc>.separated(
+                  pagingController: _paging,
+                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 100),
+                  separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.md),
+                  builderDelegate: PagedChildBuilderDelegate<EventDoc>(
+                    itemBuilder: (context, event, index) => _EventCard(
+                      event: event,
+                      isRegistered: _registeredIds.contains(event.id),
+                      onTap: () => _openEvent(event),
+                    ),
+                    noItemsFoundIndicatorBuilder: (_) => EmptyState(
+                      icon: _segment == 2 ? Icons.event_available_rounded : Icons.event_busy_rounded,
+                      message: _segment == 2
+                          ? 'You haven\'t registered for any events yet.'
+                          : _query.isNotEmpty
+                              ? 'No events match "$_query".'
+                              : 'No events here yet.',
+                    ),
+                    firstPageErrorIndicatorBuilder: (_) => EmptyState(
+                      icon: Icons.error_outline,
+                      message: friendlyError(_paging.error ?? 'Failed to load events'),
+                      action: ElevatedButton(
+                        onPressed: _paging.refresh,
+                        child: const Text('Retry'),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildAppBar() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: () => Navigator.of(context).pop(),
-            child: Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: AppColors.surfaceElevated,
-                borderRadius: AppRadius.borderRadiusSm,
-                border: Border.all(color: AppColors.border),
-              ),
-              child: const Icon(Icons.arrow_back_rounded,
-                  size: 20, color: AppColors.textSecondary),
-            ),
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Text(
-              'Events Hub',
-              style: GoogleFonts.poppins(
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary,
-                letterSpacing: -0.3,
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -226,72 +192,50 @@ class _EventsHubScreenState extends State<EventsHubScreen> {
   Widget _buildSearchBar() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-      child: SizedBox(
-        height: 44,
-        child: TextField(
-          controller: _searchController,
-          onChanged: _onSearchChanged,
-          style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textPrimary),
-          decoration: InputDecoration(
-            hintText: 'Search events...',
-            hintStyle:
-                GoogleFonts.poppins(fontSize: 13, color: AppColors.textTertiary),
-            prefixIcon: const Icon(Icons.search_rounded,
-                size: 18, color: AppColors.textTertiary),
-            suffixIcon: _searchQuery.isNotEmpty
-                ? GestureDetector(
-                    onTap: () {
-                      _searchController.clear();
-                      _onSearchChanged('');
-                    },
-                    child: const Icon(Icons.close_rounded,
-                        size: 16, color: AppColors.textTertiary),
-                  )
-                : null,
-            filled: true,
-            fillColor: AppColors.surfaceElevated,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
-            border: OutlineInputBorder(
-              borderRadius: AppRadius.borderRadiusSm,
-              borderSide: const BorderSide(color: AppColors.border),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: AppRadius.borderRadiusSm,
-              borderSide: const BorderSide(color: AppColors.border),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: AppRadius.borderRadiusSm,
-              borderSide: const BorderSide(color: AppColors.accent, width: 1.5),
-            ),
-          ),
+      child: TextField(
+        controller: _searchController,
+        onChanged: _onSearchChanged,
+        style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textPrimary),
+        decoration: InputDecoration(
+          isDense: true,
+          hintText: 'Search events...',
+          prefixIcon: const Icon(Icons.search_rounded, size: 18),
+          suffixIcon: _query.isEmpty
+              ? null
+              : IconButton(
+                  tooltip: 'Clear search',
+                  icon: const Icon(Icons.close_rounded, size: 16),
+                  onPressed: () {
+                    _searchController.clear();
+                    _onSearchChanged('');
+                  },
+                ),
         ),
       ),
     );
   }
 
-  Widget _buildSegmentedControl() {
-    const labels = ['Upcoming', 'Past', 'My Registrations'];
+  Widget _buildSegmentedControl(List<String> labels) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
       child: Container(
         padding: const EdgeInsets.all(3),
         decoration: BoxDecoration(
           color: AppColors.primaryContainer,
-          borderRadius: AppRadius.borderRadiusSm,
+          borderRadius: AppRadius.borderRadiusFull,
         ),
         child: Row(
           children: List.generate(labels.length, (i) {
-            final isActive = i == _selectedSegment;
+            final isActive = i == _segment;
             return Expanded(
               child: GestureDetector(
-                onTap: () => _onSegmentChanged(i),
+                onTap: () => _setSegment(i),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
-                  curve: Curves.easeOut,
                   padding: const EdgeInsets.symmetric(vertical: 10),
                   decoration: BoxDecoration(
                     color: isActive ? AppColors.surfaceElevated : Colors.transparent,
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: AppRadius.borderRadiusFull,
                     boxShadow: isActive ? AppShadows.sm : null,
                   ),
                   child: Center(
@@ -312,72 +256,6 @@ class _EventsHubScreenState extends State<EventsHubScreen> {
       ),
     );
   }
-
-  Widget _buildEventList() {
-    if (_isLoadingRegistrations) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    
-    return PagedListView<DocumentSnapshot?, EventDoc>.separated(
-      pagingController: _pagingController,
-      padding: const EdgeInsets.fromLTRB(20, 4, 20, 100),
-      separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.md),
-      builderDelegate: PagedChildBuilderDelegate<EventDoc>(
-        itemBuilder: (context, event, index) => _EventCard(
-          event: event,
-          isRegistered: _myRegisteredEventIds.contains(event.id),
-          onTap: () {
-            // Navigator.of(context).push(MaterialPageRoute(builder: (_) => EventDetailScreen(event: event)));
-            // Currently EventDetailScreen takes EventModel. We will need to update it or avoid clicking.
-          },
-        ),
-        noItemsFoundIndicatorBuilder: (_) => _buildEmptyState(),
-        firstPageErrorIndicatorBuilder: (_) => _buildErrorState(),
-      ),
-    );
-  }
-
-  Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            _selectedSegment == 2 ? Icons.event_available_rounded : Icons.event_busy_rounded,
-            size: 48,
-            color: AppColors.textTertiary.withValues(alpha: 0.5),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Text(
-            _selectedSegment == 2 ? 'No registrations yet' : 'No events found',
-            style: GoogleFonts.poppins(
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-              color: AppColors.textTertiary,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildErrorState() {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.error_outline, size: 48, color: AppColors.error),
-          const SizedBox(height: 16),
-          Text('Failed to load events', style: GoogleFonts.poppins(color: AppColors.textSecondary)),
-          const SizedBox(height: 16),
-          ElevatedButton(
-            onPressed: () => _pagingController.refresh(),
-            child: const Text('Retry'),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class _EventCard extends StatelessWidget {
@@ -387,25 +265,18 @@ class _EventCard extends StatelessWidget {
 
   const _EventCard({required this.event, required this.isRegistered, required this.onTap});
 
-  Color _getTagBg() {
-    final t = event.tag.toLowerCase();
-    if (t.contains('hackathon')) return AppColors.primary.withValues(alpha: 0.1);
-    if (t.contains('workshop')) return AppColors.success.withValues(alpha: 0.1);
-    return AppColors.accent.withValues(alpha: 0.1);
-  }
-
-  Color _getTagColor() {
-    final t = event.tag.toLowerCase();
-    if (t.contains('hackathon')) return AppColors.primary;
-    if (t.contains('workshop')) return AppColors.success;
-    return AppColors.accent;
-  }
-
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    final barColor = event.isFull
+        ? AppColors.error
+        : event.isNearCapacity
+            ? AppColors.warning
+            : AppColors.accent;
+
+    return InkWell(
       onTap: onTap,
-      child: Container(
+      borderRadius: AppRadius.borderRadiusLg,
+      child: Ink(
         decoration: BoxDecoration(
           color: AppColors.surfaceElevated,
           borderRadius: AppRadius.borderRadiusLg,
@@ -415,25 +286,29 @@ class _EventCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildBanner(),
+            ClipRRect(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
+              child: SizedBox(
+                height: 140,
+                width: double.infinity,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    BannerImage(url: event.bannerUrl),
+                    if (event.isPast)
+                      const Positioned(top: 10, right: 10, child: _Pill('PAST', AppColors.primary))
+                    else if (isRegistered)
+                      const Positioned(top: 10, right: 10, child: _Pill('REGISTERED', AppColors.success)),
+                  ],
+                ),
+              ),
+            ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(AppSpacing.base, AppSpacing.md, AppSpacing.base, AppSpacing.base),
+              padding: const EdgeInsets.all(AppSpacing.base),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(color: _getTagBg(), borderRadius: AppRadius.borderRadiusXs),
-                    child: Text(
-                      event.tag.toUpperCase(),
-                      style: GoogleFonts.poppins(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                        color: _getTagColor(),
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                  ),
+                  TagChip(label: event.tag),
                   const SizedBox(height: 8),
                   Text(
                     event.title,
@@ -447,181 +322,43 @@ class _EventCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  _infoRow(Icons.calendar_today_outlined, _formatDate(event.eventDate)),
+                  _infoRow(Icons.calendar_today_outlined, formatEventDate(event.eventDate)),
                   const SizedBox(height: 6),
                   _infoRow(Icons.location_on_outlined, event.venue),
                   const SizedBox(height: 12),
-                  _buildSeatProgress(),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        '${event.filledSeats}/${event.totalSeats} seats',
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: barColor,
+                        ),
+                      ),
+                      if (event.isFull)
+                        Text('Full', style: GoogleFonts.poppins(fontSize: 11, color: AppColors.error))
+                      else if (event.isNearCapacity)
+                        Text('Filling fast', style: GoogleFonts.poppins(fontSize: 11, color: AppColors.warning)),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  ClipRRect(
+                    borderRadius: AppRadius.borderRadiusFull,
+                    child: LinearProgressIndicator(
+                      value: event.fillRatio.clamp(0.0, 1.0),
+                      backgroundColor: barColor.withValues(alpha: 0.12),
+                      color: barColor,
+                      minHeight: 6,
+                    ),
+                  ),
                 ],
               ),
             ),
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildBanner() {
-    return ClipRRect(
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
-      child: SizedBox(
-        height: 140,
-        width: double.infinity,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            if (event.bannerUrl != null && event.bannerUrl!.startsWith('http'))
-              Image.network(event.bannerUrl!, fit: BoxFit.cover)
-            else if (event.bannerUrl != null)
-              Image.asset(event.bannerUrl!, fit: BoxFit.cover)
-            else
-              Container(color: AppColors.primaryContainer),
-            Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Colors.transparent, AppColors.primary.withValues(alpha: 0.5)],
-                    stops: const [0.4, 1.0],
-                  ),
-                ),
-              ),
-            ),
-            Positioned(
-              top: 10,
-              left: 10,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceElevated,
-                  borderRadius: AppRadius.borderRadiusXs,
-                  boxShadow: AppShadows.sm,
-                ),
-                child: Column(
-                  children: [
-                    Text(
-                      event.eventDate.day.toString(),
-                      style: GoogleFonts.poppins(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.textPrimary,
-                        height: 1.1,
-                      ),
-                    ),
-                    Text(
-                      _monthAbbr(event.eventDate.month),
-                      style: GoogleFonts.poppins(
-                        fontSize: 9,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.accent,
-                        letterSpacing: 0.8,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            if (event.isPast)
-              Positioned(
-                top: 10,
-                right: 10,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withValues(alpha: 0.8),
-                    borderRadius: AppRadius.borderRadiusFull,
-                  ),
-                  child: Text(
-                    'PAST',
-                    style: GoogleFonts.poppins(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white.withValues(alpha: 0.7),
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ),
-              ),
-            if (isRegistered && !event.isPast)
-              Positioned(
-                top: 10,
-                right: 10,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppColors.success.withValues(alpha: 0.9),
-                    borderRadius: AppRadius.borderRadiusFull,
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.check_circle_rounded, size: 12, color: Colors.white),
-                      const SizedBox(width: 4),
-                      Text(
-                        'REGISTERED',
-                        style: GoogleFonts.poppins(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSeatProgress() {
-    final ratio = event.fillRatio.clamp(0.0, 1.0);
-    final isNear = event.isNearCapacity;
-    final isFull = event.isFull;
-
-    final Color barColor = isFull ? AppColors.error : isNear ? AppColors.warning : AppColors.accent;
-    final Color barBg = isFull ? AppColors.error.withValues(alpha: 0.12) : isNear ? AppColors.warning.withValues(alpha: 0.12) : AppColors.accentMuted;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.people_outline_rounded, size: 14, color: barColor),
-                const SizedBox(width: 4),
-                Text(
-                  '${event.filledSeats}/${event.totalSeats} seats',
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: barColor,
-                  ),
-                ),
-              ],
-            ),
-            if (isFull)
-              Text('Full', style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.error))
-            else if (isNear)
-              Text('Filling fast!', style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.warning)),
-          ],
-        ),
-        const SizedBox(height: 6),
-        ClipRRect(
-          borderRadius: AppRadius.borderRadiusFull,
-          child: LinearProgressIndicator(
-            value: ratio,
-            backgroundColor: barBg,
-            color: barColor,
-            minHeight: 6,
-          ),
-        ),
-      ],
     );
   }
 
@@ -633,24 +370,46 @@ class _EventCard extends StatelessWidget {
         Flexible(
           child: Text(
             text,
-            style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary),
             overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary),
           ),
         ),
       ],
     );
   }
+}
 
-  String _formatDate(DateTime dt) {
-    const months = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    final h = dt.hour > 12 ? dt.hour - 12 : dt.hour;
-    final amPm = dt.hour >= 12 ? 'PM' : 'AM';
-    final min = dt.minute.toString().padLeft(2, '0');
-    return '${months[dt.month]} ${dt.day}, ${dt.year} · $h:$min $amPm';
-  }
+class _Pill extends StatelessWidget {
+  final String label;
+  final Color color;
 
-  String _monthAbbr(int m) {
-    const months = ['', 'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-    return months[m];
+  const _Pill(this.label, this.color);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.9),
+        borderRadius: AppRadius.borderRadiusFull,
+      ),
+      child: Text(
+        label,
+        style: GoogleFonts.poppins(
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+          color: Colors.white,
+          letterSpacing: 0.5,
+        ),
+      ),
+    );
   }
+}
+
+String formatEventDate(DateTime dt) {
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  final hour = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+  final amPm = dt.hour >= 12 ? 'PM' : 'AM';
+  final minute = dt.minute.toString().padLeft(2, '0');
+  return '${months[dt.month - 1]} ${dt.day}, ${dt.year} · $hour:$minute $amPm';
 }

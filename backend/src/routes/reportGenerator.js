@@ -1,55 +1,44 @@
 /**
  * POST /api/generate-report
  *
- * Role-gated: hod, event_faculty only.
- * Takes a brief + optional event data, calls Gemini 1.5 Flash,
- * returns formatted markdown.
+ * Role-gated: hod (any event), coordinator (events they created).
+ * Takes a brief + optional event data, calls Gemini, returns formatted
+ * markdown and saves it onto the event as `report` so the accreditation
+ * compiler and event pages can use it.
  *
  * Request body:
  *   {
  *     "brief": "Generate a report on Neural Hack 2026...",
- *     "eventId": "optional-event-id",
+ *     "eventId": "event-id (required for coordinators)",
  *     "includeAttendance": true,
  *     "additionalContext": "EXIF data, photos metadata, etc."
  *   }
  *
  * Response:
- *   {
- *     "markdown": "# Neural Hack 2026 Report\n\n## Executive Summary...",
- *     "model": "gemini-1.5-flash",
- *     "generatedAt": "2026-09-04T..."
- *   }
+ *   { "markdown": "...", "model": "...", "eventId": "...", "generatedBy": "...", "generatedAt": "..." }
  */
 
 import { Router } from 'express';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import rateLimit from 'express-rate-limit';
 import admin from 'firebase-admin';
 import { verifyAuth, requireRole } from '../middleware/verifyAuth.js';
+import { GEMINI_MODEL, geminiLimiter, geminiModel } from '../utils/gemini.js';
+import { getEventForStaff } from '../utils/eventAccess.js';
 
 const router = Router();
 let _db;
 function db() { if (!_db) _db = admin.firestore(); return _db; }
 
-// ── Rate limiter for Gemini routes ──────────────────────────────────
-
-const geminiLimiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10),
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '10', 10),
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: {
-    error: 'Too many AI requests. Please wait before trying again.',
-  },
-});
-
-// ── Route ───────────────────────────────────────────────────────────
+const SYSTEM_PROMPT = `You are AIKYA's AI report generator for the AI & ML department at SMVITM.
+Generate a well-structured, professional report in Markdown format.
+Use clear headings, bullet points, and tables where appropriate.
+Be factual and concise. If event data is provided, incorporate it accurately.
+The report should be suitable for accreditation documentation.`;
 
 router.post(
   '/generate-report',
   geminiLimiter,
   verifyAuth,
-  requireRole('hod', 'event_faculty'),
+  requireRole('hod', 'coordinator'),
   async (req, res) => {
     try {
       const { brief, eventId, includeAttendance, additionalContext } = req.body;
@@ -60,40 +49,35 @@ router.post(
         });
       }
 
-      // Optionally pull event data from Firestore for grounding
-      let eventContext = '';
-      if (eventId) {
-        const eventDoc = await db().collection('events').doc(eventId).get();
-        if (eventDoc.exists) {
-          const e = eventDoc.data();
-          eventContext = `
-Event Details:
-- Title: ${e.title}
-- Date: ${e.eventDate?.toDate?.()?.toISOString() || 'N/A'}
-- Venue: ${e.venue}
-- Registrations: ${e.currentRegistrations}/${e.maxCapacity}
-- Tag: ${e.tag}
-- Description: ${e.description}
-`;
-
-          // Pull registration count if requested
-          if (includeAttendance) {
-            const regsSnap = await db
-              .collection('events')
-              .doc(eventId)
-              .collection('registrations')
-              .get();
-            eventContext += `- Total Registered Students: ${regsSnap.size}\n`;
-          }
-        }
+      if (req.role === 'coordinator' && !eventId) {
+        return res.status(400).json({ error: 'Coordinators must pick one of their events.' });
       }
 
-      // Build the Gemini prompt
-      const systemPrompt = `You are AIKYA's AI report generator for the AI & ML department at SMVITM.
-Generate a well-structured, professional report in Markdown format.
-Use clear headings, bullet points, and tables where appropriate.
-Be factual and concise. If event data is provided, incorporate it accurately.
-The report should be suitable for accreditation documentation.`;
+      let eventContext = '';
+      if (eventId) {
+        const { event, status, error } = await getEventForStaff(db(), eventId, req);
+        if (error) return res.status(status).json({ error });
+
+        eventContext = `
+Event Details:
+- Title: ${event.title}
+- Date: ${event.eventDate?.toDate?.()?.toISOString() || 'N/A'}
+- Venue: ${event.venue}
+- Registrations: ${event.currentRegistrations}/${event.maxCapacity}
+- Tag: ${event.tag || 'N/A'}
+- Description: ${event.description}
+`;
+
+        if (includeAttendance) {
+          const regs = await db()
+            .collection('events')
+            .doc(eventId)
+            .collection('registrations')
+            .count()
+            .get();
+          eventContext += `- Total Registered Students: ${regs.data().count}\n`;
+        }
+      }
 
       const userPrompt = `${brief}
 
@@ -102,19 +86,26 @@ ${additionalContext ? `\n--- ADDITIONAL CONTEXT ---\n${additionalContext}` : ''}
 
 Generate a comprehensive, formatted Markdown report.`;
 
-      // Call Gemini 1.5 Flash
-      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-      const model = genAI.getGenerativeModel({
-        model: 'gemini-1.5-flash',
-        systemInstruction: systemPrompt,
-      });
-
-      const result = await model.generateContent(userPrompt);
+      const result = await geminiModel(SYSTEM_PROMPT).generateContent(userPrompt);
       const markdown = result.response.text();
+
+      if (eventId) {
+        await db().collection('events').doc(eventId).set(
+          {
+            report: {
+              markdown,
+              model: GEMINI_MODEL,
+              generatedBy: req.uid,
+              generatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+          },
+          { merge: true },
+        );
+      }
 
       return res.json({
         markdown,
-        model: 'gemini-1.5-flash',
+        model: GEMINI_MODEL,
         eventId: eventId || null,
         generatedBy: req.uid,
         generatedAt: new Date().toISOString(),

@@ -1,30 +1,26 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:infinite_scroll_pagination/infinite_scroll_pagination.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:timeago/timeago.dart' as timeago;
 
 import '../../core/theme/app_tokens.dart';
-import '../../features/admin/data/attendance_request_doc.dart';
-import '../../features/auth/data/user_doc.dart';
+import '../../models/firestore/attendance_request.dart';
 import '../../models/firestore/event_doc.dart';
-import '../../services/render_api_service.dart';
 import '../../services/firebase_service.dart';
+import '../../services/render_api_service.dart';
+import '../../utils/friendly_error.dart';
+import '../../widgets/shared_widgets.dart';
 
-class AttendanceRequestPresentationData {
-  final AttendanceRequestDoc request;
-  final UserDoc? user;
-  final EventDoc? event;
+final _pendingRequestsProvider = StreamProvider.autoDispose<List<AttendanceRequestDoc>>((ref) {
+  return AttendanceRequestDoc.collection
+      .where('status', isEqualTo: 'pending')
+      .orderBy('createdAt', descending: true)
+      .snapshots()
+      .map((snap) => snap.docs.map(AttendanceRequestDoc.fromFirestore).toList());
+});
 
-  AttendanceRequestPresentationData({
-    required this.request,
-    required this.user,
-    required this.event,
-  });
-}
-
+/// HOD attendance/OD request workspace — decisions go through the backend
+/// so the student is notified.
 class AdminAttendanceRequestsView extends ConsumerStatefulWidget {
   const AdminAttendanceRequestsView({super.key});
 
@@ -33,385 +29,125 @@ class AdminAttendanceRequestsView extends ConsumerStatefulWidget {
 }
 
 class _AdminAttendanceRequestsViewState extends ConsumerState<AdminAttendanceRequestsView> {
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final Set<String> _busy = {};
 
-  final PagingController<DocumentSnapshot?, AttendanceRequestPresentationData> _pagingController =
-      PagingController(firstPageKey: null);
-
-  @override
-  void initState() {
-    super.initState();
-    _pagingController.addPageRequestListener((pageKey) {
-      _fetchPage(pageKey);
-    });
-  }
-
-  Future<void> _fetchPage(DocumentSnapshot? pageKey) async {
-    try {
-      const pageSize = 15;
-      Query query = _firestore
-          .collectionGroup('attendanceRequests') // it's a subcollection under events
-          .where('status', isEqualTo: 'pending')
-          .orderBy('createdAt', descending: true)
-          .limit(pageSize);
-
-      if (pageKey != null) {
-        query = query.startAfterDocument(pageKey);
-      }
-
-      final snap = await query.get();
-      final isLastPage = snap.docs.length < pageSize;
-
-      List<AttendanceRequestPresentationData> newItems = [];
-      for (var doc in snap.docs) {
-        final data = doc.data() as Map<String, dynamic>;
-        final request = AttendanceRequestDoc.fromJson({'id': doc.id, ...data});
-
-        final userSnap = await _firestore.collection('users').doc(request.studentId).get();
-        UserDoc? userDoc;
-        if (userSnap.exists) {
-          userDoc = UserDoc.fromJson({'id': userSnap.id, ...userSnap.data()!});
-        }
-
-        final eventSnap = await _firestore.collection('events').doc(request.eventId).get();
-        EventDoc? eventDoc;
-        if (eventSnap.exists) {
-          eventDoc = EventDoc.fromJson({'id': eventSnap.id, ...eventSnap.data()!});
-        }
-
-        newItems.add(AttendanceRequestPresentationData(
-          request: request,
-          user: userDoc,
-          event: eventDoc,
-        ));
-      }
-
-      if (isLastPage) {
-        _pagingController.appendLastPage(newItems);
-      } else {
-        _pagingController.appendPage(newItems, snap.docs.last);
-      }
-    } catch (error) {
-      _pagingController.error = error;
-    }
-  }
-
-  void _handleApprove(String id, String eventId, String studentId, String eventTitle) async {
-    try {
-      final authUser = ref.read(authStateProvider).value;
-      if (authUser == null) throw Exception('No auth user');
-      final idToken = await authUser.getIdToken();
-
-      final response = await http.post(
-        Uri.parse('${RenderApiService.baseUrl}/messaging/attendance/approve'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $idToken',
-        },
-        body: jsonEncode({
-          'requestId': id,
-          'eventId': eventId,
-          'studentId': studentId,
-          'eventTitle': eventTitle,
-        }),
+  Future<void> _review(AttendanceRequestDoc request, bool approve) async {
+    var note = '';
+    if (!approve) {
+      final controller = TextEditingController();
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Reject request?'),
+          content: TextField(
+            controller: controller,
+            maxLength: 300,
+            decoration: const InputDecoration(labelText: 'Reason (sent to the student)'),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: TextButton.styleFrom(foregroundColor: AppColors.error),
+              child: const Text('Reject'),
+            ),
+          ],
+        ),
       );
-
-      if (response.statusCode != 200) {
-        throw Exception('Failed to approve attendance');
-      }
-      _pagingController.refresh();
-    } catch (e) {
-      // Show error
-      print(e);
+      note = controller.text.trim();
+      controller.dispose();
+      if (confirmed != true) return;
     }
-  }
 
-  void _handleReject(String id, String eventId, String studentId, String eventTitle, String note) async {
+    setState(() => _busy.add(request.id));
     try {
-      final authUser = ref.read(authStateProvider).value;
-      if (authUser == null) throw Exception('No auth user');
-      final idToken = await authUser.getIdToken();
-
-      final response = await http.post(
-        Uri.parse('${RenderApiService.baseUrl}/messaging/attendance/reject'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $idToken',
-        },
-        body: jsonEncode({
-          'requestId': id,
-          'eventId': eventId,
-          'studentId': studentId,
-          'eventTitle': eventTitle,
-          'note': note,
-        }),
-      );
-
-      if (response.statusCode != 200) {
-        throw Exception('Failed to reject attendance');
-      }
-      _pagingController.refresh();
+      await ref.read(renderApiServiceProvider).reviewAttendance(requestId: request.id, approve: approve, note: note);
     } catch (e) {
-      // Show error
-      print(e);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(friendlyError(e)), backgroundColor: AppColors.error),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy.remove(request.id));
     }
-  }
-
-  @override
-  void dispose() {
-    _pagingController.dispose();
-    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: AppColors.primarySurface,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Pending Requests',
-                  style: GoogleFonts.poppins(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.textPrimary,
-                    letterSpacing: -0.5,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Review and approve leave or duty attendance for students.',
-                  style: GoogleFonts.poppins(fontSize: 14, color: AppColors.textSecondary),
-                ),
-              ],
+    final requests = ref.watch(_pendingRequestsProvider);
+
+    return requests.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => EmptyState(icon: Icons.error_outline, message: friendlyError(e)),
+      data: (list) => list.isEmpty
+          ? const EmptyState(icon: Icons.done_all_rounded, message: 'All caught up — no pending requests.')
+          : ListView.separated(
+              padding: const EdgeInsets.all(20),
+              itemCount: list.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              itemBuilder: (_, i) => _card(list[i]),
             ),
-          ),
-          Expanded(
-            child: PagedListView<DocumentSnapshot?, AttendanceRequestPresentationData>(
-              pagingController: _pagingController,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-              builderDelegate: PagedChildBuilderDelegate<AttendanceRequestPresentationData>(
-                itemBuilder: (context, data, index) {
-                  return _RequestCard(
-                    data: data,
-                    onApprove: () => _handleApprove(data.request.id, data.request.eventId, data.request.userId, data.event?.eventTitle ?? 'Event'),
-                    onReject: (note) => _handleReject(data.request.id, data.request.eventId, data.request.userId, data.event?.eventTitle ?? 'Event', note),
-                  );
-                },
-                noItemsFoundIndicatorBuilder: (_) => Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.done_all_rounded, size: 64, color: AppColors.textTertiary),
-                      const SizedBox(height: 16),
-                      Text('All caught up!',
-                          style: GoogleFonts.poppins(
-                              fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                      const SizedBox(height: 8),
-                      Text('No pending attendance requests.',
-                          style: GoogleFonts.poppins(color: AppColors.textSecondary)),
-                    ],
-                  ),
-                ),
-                firstPageErrorIndicatorBuilder: (_) => const Center(
-                  child: Text('Failed to load pending requests.'),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
-}
 
-class _RequestCard extends StatefulWidget {
-  final AttendanceRequestPresentationData data;
-  final VoidCallback onApprove;
-  final Function(String) onReject;
+  Widget _card(AttendanceRequestDoc request) {
+    final busy = _busy.contains(request.id);
+    final db = ref.read(firebaseServiceProvider).firestore;
 
-  const _RequestCard({
-    required this.data,
-    required this.onApprove,
-    required this.onReject,
-  });
-
-  @override
-  State<_RequestCard> createState() => _RequestCardState();
-}
-
-class _RequestCardState extends State<_RequestCard> {
-  bool _isExpanded = false;
-  bool _isRejecting = false;
-  final TextEditingController _noteController = TextEditingController();
-
-  @override
-  void dispose() {
-    _noteController.dispose();
-    super.dispose();
-  }
-
-  void _toggleExpand() => setState(() => _isExpanded = !_isExpanded);
-  void _handleRejectInitiate() => setState(() => _isRejecting = true);
-  void _handleConfirmReject() => widget.onReject(_noteController.text.trim());
-
-  String _formatDate(DateTime dt) {
-    const months = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    return '${months[dt.month]} ${dt.day}, ${dt.year}';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final req = widget.data.request;
-    final user = widget.data.user;
-    final event = widget.data.event;
-
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-      margin: const EdgeInsets.only(bottom: 16),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceElevated,
-        borderRadius: AppRadius.borderRadiusLg,
-        border: Border.all(
-          color: _isRejecting ? AppColors.error.withValues(alpha: 0.5) : AppColors.border,
-        ),
-        boxShadow: AppShadows.sm,
-      ),
+    return Card(
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        user?.fullName ?? 'Unknown Student',
-                        style: GoogleFonts.poppins(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          Text(
-                            user?.usn ?? 'Unknown USN',
-                            style: GoogleFonts.robotoMono(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textTertiary,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: AppColors.accent.withValues(alpha: 0.15),
-                                borderRadius: AppRadius.borderRadiusXs,
-                              ),
-                              child: Text(
-                                event?.title ?? 'Unknown Event',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.poppins(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppColors.accent,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                if (event != null)
-                  Text(
-                    _formatDate(event.eventDate),
-                    style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary),
-                  ),
-              ],
+            FutureBuilder(
+              future: Future.wait([
+                db.collection('users').doc(request.studentId).get(),
+                EventDoc.docRef(request.eventId).get(),
+              ]),
+              builder: (context, snapshot) {
+                final student = snapshot.data?[0].data();
+                final event = snapshot.data?[1].data();
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      student?['fullName'] as String? ?? 'Student',
+                      style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700),
+                    ),
+                    Text(
+                      [student?['usn'] as String? ?? '', event?['title'] as String? ?? 'Event']
+                          .where((s) => s.isNotEmpty)
+                          .join(' · '),
+                      style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary),
+                    ),
+                  ],
+                );
+              },
             ),
-            const SizedBox(height: 16),
-            GestureDetector(
-              onTap: _toggleExpand,
-              child: AnimatedCrossFade(
-                firstChild: Text(
-                  req.requestDetails,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary, height: 1.5),
-                ),
-                secondChild: Text(
-                  req.requestDetails,
-                  style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary, height: 1.5),
-                ),
-                crossFadeState: _isExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
-                duration: const Duration(milliseconds: 200),
+            const SizedBox(height: 12),
+            Text(request.requestDetails, style: GoogleFonts.poppins(fontSize: 13, height: 1.5)),
+            if (request.createdAt != null)
+              Text(
+                'Submitted ${timeago.format(request.createdAt!)}',
+                style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textTertiary),
               ),
-            ),
-            const SizedBox(height: 4),
-            GestureDetector(
-              onTap: _toggleExpand,
-              child: Text(
-                _isExpanded ? 'Show less' : 'Read more',
-                style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.accent),
-              ),
-            ),
-            const SizedBox(height: 20),
-            if (_isRejecting) ...[
-              TextField(
-                controller: _noteController,
-                style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textPrimary),
-                decoration: InputDecoration(
-                  hintText: 'Reason for rejection (optional)',
-                  hintStyle: GoogleFonts.poppins(color: AppColors.textTertiary),
-                  filled: true,
-                  fillColor: AppColors.primaryContainer,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  border: OutlineInputBorder(borderRadius: AppRadius.borderRadiusSm, borderSide: BorderSide.none),
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
+            const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(
                   child: OutlinedButton(
-                    onPressed: _isRejecting ? _handleConfirmReject : _handleRejectInitiate,
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.error,
-                      side: BorderSide(color: _isRejecting ? AppColors.error : AppColors.border),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
-                    child: Text(_isRejecting ? 'Confirm Reject' : 'Reject'),
+                    onPressed: busy ? null : () => _review(request, false),
+                    style: OutlinedButton.styleFrom(foregroundColor: AppColors.error),
+                    child: const Text('Reject'),
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: widget.onApprove,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.success,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
+                    onPressed: busy ? null : () => _review(request, true),
+                    style: ElevatedButton.styleFrom(backgroundColor: AppColors.success),
                     child: const Text('Approve'),
                   ),
                 ),

@@ -13,12 +13,13 @@ admin.initializeApp({
   storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
 });
 
+// One coordinator per club (spec §5).
 const coordinatorData = [
-  { facultyId: 'C001', fullName: 'Coordinator One', designation: 'Technical Club Coordinator', role: 'coordinator', club: 'Technical Club' },
-  { facultyId: 'C002', fullName: 'Coordinator Two', designation: 'Cultural Club Coordinator', role: 'coordinator', club: 'Cultural Club' },
-  { facultyId: 'C003', fullName: 'Coordinator Three', designation: 'Sports Club Coordinator', role: 'coordinator', club: 'Sports Club' },
-  { facultyId: 'C004', fullName: 'Coordinator Four', designation: 'Literary Club Coordinator', role: 'coordinator', club: 'Literary Club' },
-  { facultyId: 'C005', fullName: 'Coordinator Five', designation: 'Innovation Club Coordinator', role: 'coordinator', club: 'Innovation Club' },
+  { facultyId: 'C001', fullName: 'Coordinator One', designation: 'Aikya Club Coordinator', role: 'coordinator', club: 'Aikya' },
+  { facultyId: 'C002', fullName: 'Coordinator Two', designation: 'IEEE Coordinator', role: 'coordinator', club: 'IEEE' },
+  { facultyId: 'C003', fullName: 'Coordinator Three', designation: 'ISTE Coordinator', role: 'coordinator', club: 'ISTE' },
+  { facultyId: 'C004', fullName: 'Coordinator Four', designation: 'Co-curricular Coordinator', role: 'coordinator', club: 'Co-curricular' },
+  { facultyId: 'C005', fullName: 'Coordinator Five', designation: 'Extra-curricular Coordinator', role: 'coordinator', club: 'Extra-curricular' },
 ];
 
 async function seedCoordinators() {
@@ -48,10 +49,6 @@ async function seedCoordinators() {
           throw authError;
         }
       }
-
-      const claims = { role };
-      if (club) claims.club = club;
-      await admin.auth().setCustomUserClaims(userRecord.uid, claims);
 
       const userDoc = {
         uid: userRecord.uid,

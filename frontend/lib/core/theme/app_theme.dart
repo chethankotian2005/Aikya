@@ -1,74 +1,74 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-class AppTheme {
-  // Using the locked brand colors from aikya_design_system.md
-  static const primaryColor = Color(0xFF0E1B3D);
-  static const secondaryColor = Color(0xFF1F5C99);
-  static const accentColor = Color(0xFF3B9AE1);
-  static const neutralBlack = Color(0xFF0A0A0A);
-  
-  static ThemeData get lightTheme {
-    return ThemeData(
-      useMaterial3: true,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: primaryColor,
-        primary: primaryColor,
-        secondary: secondaryColor,
-        tertiary: accentColor,
-        background: Colors.white,
-        surface: Colors.white,
-        onPrimary: Colors.white,
-        onSecondary: Colors.white,
-      ),
-      textTheme: GoogleFonts.poppinsTextTheme(ThemeData.light().textTheme),
-      appBarTheme: const AppBarTheme(
-        backgroundColor: Colors.white,
-        foregroundColor: primaryColor,
-        elevation: 0,
-      ),
-      elevatedButtonTheme: ElevatedButtonThemeData(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: secondaryColor,
-          foregroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(999), // Fully rounded pills
-          ),
-        ),
-      ),
-    );
-  }
+import 'app_tokens.dart';
 
-  static ThemeData get darkTheme {
+/// Material theme built from the locked AIKYA tokens (spec §3), so the
+/// Flutter app and the Next.js app render the same values.
+class AppTheme {
+  AppTheme._();
+
+  static ThemeData get lightTheme {
+    final scheme = ColorScheme.fromSeed(
+      seedColor: AppColors.primary,
+      primary: AppColors.primary,
+      onPrimary: AppColors.onPrimary,
+      secondary: AppColors.secondary,
+      onSecondary: AppColors.onPrimary,
+      tertiary: AppColors.accent,
+      surface: AppColors.surfaceElevated,
+      error: AppColors.error,
+    );
+
+    final inputBorder = OutlineInputBorder(
+      borderRadius: AppRadius.borderRadiusSm,
+      borderSide: const BorderSide(color: AppColors.border),
+    );
+
     return ThemeData(
       useMaterial3: true,
-      brightness: Brightness.dark,
-      colorScheme: ColorScheme.fromSeed(
-        brightness: Brightness.dark,
-        seedColor: primaryColor,
-        primary: primaryColor,
-        secondary: secondaryColor,
-        tertiary: accentColor,
-        background: const Color(0xFF0B0F1F), // Near-black navy
-        surface: const Color(0xFF0B0F1F),
-        onPrimary: Colors.white,
-        onSecondary: Colors.white,
-      ),
-      textTheme: GoogleFonts.poppinsTextTheme(ThemeData.dark().textTheme),
+      colorScheme: scheme,
+      scaffoldBackgroundColor: AppColors.primarySurface,
+      textTheme: GoogleFonts.poppinsTextTheme(ThemeData.light().textTheme)
+          .apply(bodyColor: AppColors.textPrimary, displayColor: AppColors.textPrimary),
       appBarTheme: const AppBarTheme(
-        backgroundColor: Color(0xFF0B0F1F),
-        foregroundColor: Colors.white,
+        backgroundColor: AppColors.surfaceElevated,
+        foregroundColor: AppColors.primary,
         elevation: 0,
+        scrolledUnderElevation: 0,
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: secondaryColor,
-          foregroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(999),
-          ),
+          backgroundColor: AppColors.secondary,
+          foregroundColor: AppColors.onPrimary,
+          shape: const StadiumBorder(),
+          textStyle: GoogleFonts.poppins(fontWeight: FontWeight.w600),
         ),
       ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(shape: const StadiumBorder()),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(foregroundColor: AppColors.secondary),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: AppColors.surfaceElevated,
+        border: inputBorder,
+        enabledBorder: inputBorder,
+        focusedBorder: inputBorder.copyWith(
+          borderSide: const BorderSide(color: AppColors.accent, width: 1.5),
+        ),
+      ),
+      cardTheme: CardThemeData(
+        color: AppColors.surfaceElevated,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: AppRadius.borderRadiusLg,
+          side: const BorderSide(color: AppColors.border),
+        ),
+      ),
+      snackBarTheme: const SnackBarThemeData(behavior: SnackBarBehavior.floating),
     );
   }
 }

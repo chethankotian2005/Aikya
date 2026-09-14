@@ -1,399 +1,176 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../../core/theme/app_tokens.dart';
 
-class AdminAnalyticsView extends StatefulWidget {
+import '../../core/theme/app_tokens.dart';
+import '../../models/firestore/event_doc.dart';
+import '../../services/render_api_service.dart';
+import '../../utils/friendly_error.dart';
+import '../../widgets/shared_widgets.dart';
+import '../events_hub_screen.dart' show formatEventDate;
+import 'admin_manage_events_view.dart' show manageableEventsProvider;
+
+/// Analytics + Feedback Sentiment Rollup (HOD: all events, coordinators: own).
+class AdminAnalyticsView extends ConsumerStatefulWidget {
   const AdminAnalyticsView({super.key});
 
   @override
-  State<AdminAnalyticsView> createState() => _AdminAnalyticsViewState();
+  ConsumerState<AdminAnalyticsView> createState() => _AdminAnalyticsViewState();
 }
 
-class _AdminAnalyticsViewState extends State<AdminAnalyticsView> {
-  // Mock data for sentiments
-  final List<Map<String, dynamic>> _sentiments = [
-    {
-      'event': 'Introduction to GenAI & RAG',
-      'positive': 82,
-      'neutral': 12,
-      'negative': 6,
-      'isExpanded': false,
-      'comments': [
-        {'text': 'Absolutely loved building the RAG pipeline!', 'type': 'pos'},
-        {'text': 'Good content but the pacing was a bit fast.', 'type': 'neu'},
-        {'text': 'Couldn\'t connect to the local server.', 'type': 'neg'},
-      ],
-    },
-    {
-      'event': 'Alumni Talk: Career Paths in ML',
-      'positive': 90,
-      'neutral': 8,
-      'negative': 2,
-      'isExpanded': false,
-      'comments': [
-        {'text': 'Very inspiring talk by Priya.', 'type': 'pos'},
-        {'text': 'Helped clarify my doubts about MLOps.', 'type': 'pos'},
-      ],
-    },
-    {
-      'event': 'Neural Hack 2026',
-      'positive': 65,
-      'neutral': 20,
-      'negative': 15,
-      'isExpanded': false,
-      'comments': [
-        {'text': 'Great energy and mentoring!', 'type': 'pos'},
-        {'text': 'Food arrangements could be better next time.', 'type': 'neg'},
-        {'text': 'Wi-Fi kept dropping during the final hours.', 'type': 'neg'},
-      ],
-    },
-  ];
+class _AdminAnalyticsViewState extends ConsumerState<AdminAnalyticsView> {
+  final Set<String> _running = {};
+
+  Future<void> _runRollup(EventDoc event) async {
+    setState(() => _running.add(event.id));
+    try {
+      final result = await ref.read(renderApiServiceProvider).sentimentRollup(eventId: event.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Analysed ${result['totalComments']} comments for "${event.title}".'),
+          backgroundColor: AppColors.success,
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(friendlyError(e)), backgroundColor: AppColors.error),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _running.remove(event.id));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.primarySurface,
-      body: ListView(
-        padding: const EdgeInsets.all(24.0),
-        children: [
-          _buildHeader(),
-          const SizedBox(height: 32),
-          _buildKPIs(),
-          const SizedBox(height: 48),
-          _buildTurnoutChart(),
-          const SizedBox(height: 48),
-          _buildFeedbackSentiment(),
-          const SizedBox(height: 48),
-        ],
-      ),
-    );
-  }
+    final events = ref.watch(manageableEventsProvider);
 
-  Widget _buildHeader() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Analytics & Insights',
-          style: GoogleFonts.poppins(
-            fontSize: 24,
-            fontWeight: FontWeight.w800,
-            color: AppColors.textPrimary,
-            letterSpacing: -0.5,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'HOD Dashboard — Even Semester 2026',
-          style: GoogleFonts.poppins(fontSize: 14, color: AppColors.textSecondary),
-        ),
-      ],
-    );
-  }
+    return events.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => EmptyState(icon: Icons.error_outline, message: friendlyError(e)),
+      data: (list) {
+        if (list.isEmpty) {
+          return const EmptyState(icon: Icons.insights_outlined, message: 'No events to analyse yet.');
+        }
 
-  // ─── KPIs ─────────────────────────────────────────────────────────
-  Widget _buildKPIs() {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // Simple responsiveness
-        int crossAxisCount = constraints.maxWidth > 800 ? 4 : 2;
-        return GridView.count(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          crossAxisCount: crossAxisCount,
-          crossAxisSpacing: 16,
-          mainAxisSpacing: 16,
-          childAspectRatio: 1.8,
+        final registrations = list.fold<int>(0, (sum, e) => sum + e.filledSeats);
+        final capacity = list.fold<int>(0, (sum, e) => sum + e.totalSeats);
+        final analysed = list.where((e) => e.sentimentPercentages != null).toList();
+        final avgPositive = analysed.isEmpty
+            ? null
+            : (analysed.fold<int>(0, (s, e) => s + (e.sentimentPercentages!['positive'] ?? 0)) / analysed.length).round();
+
+        return ListView(
+          padding: const EdgeInsets.all(20),
           children: [
-            _kpiCard('Total Events', '14', true, '↑ 2 from last sem'),
-            _kpiCard('Active Students', '312', true, '↑ 12% engagement'),
-            _kpiCard('Alumni Mentors', '42', true, '↑ 5 joined this week'),
-            _kpiCard('Pending Approvals', '18', false, 'Requires attention'),
+            Text('Analytics & insights', style: GoogleFonts.poppins(fontSize: 22, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                _summary('Events', '${list.length}'),
+                _summary('Registrations', '$registrations'),
+                _summary('Fill rate', capacity == 0 ? '–' : '${(registrations * 100 / capacity).round()}%'),
+                _summary('Avg. positive', avgPositive == null ? '–' : '$avgPositive%', ai: true),
+              ],
+            ),
+            const SizedBox(height: 24),
+            for (final e in list) _eventCard(e),
           ],
         );
       },
     );
   }
 
-  Widget _kpiCard(String title, String value, bool isPositiveTrend, String trendText) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceElevated,
-        borderRadius: AppRadius.borderRadiusLg,
-        border: Border.all(color: AppColors.border),
-        boxShadow: AppShadows.sm,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(title, style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
+  Widget _summary(String label, String value, {bool ai = false}) {
+    return SizedBox(
+      width: 150,
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                value,
-                style: GoogleFonts.poppins(fontSize: 32, fontWeight: FontWeight.w800, color: AppColors.textPrimary, height: 1),
-              ),
-              const SizedBox(width: 8),
-              if (trendText.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4.0),
-                  child: Row(
-                    children: [
-                      if (isPositiveTrend) const Icon(Icons.arrow_upward_rounded, size: 12, color: AppColors.success)
-                      else if (title != 'Pending Approvals') const Icon(Icons.arrow_downward_rounded, size: 12, color: AppColors.error),
-                      const SizedBox(width: 2),
-                      Text(
-                        trendText,
-                        style: GoogleFonts.poppins(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: isPositiveTrend ? AppColors.success : (title == 'Pending Approvals' ? AppColors.warning : AppColors.error),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ─── Chart ────────────────────────────────────────────────────────
-  Widget _buildTurnoutChart() {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceElevated,
-        borderRadius: AppRadius.borderRadiusLg,
-        border: Border.all(color: AppColors.border),
-        boxShadow: AppShadows.sm,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Event Turnout Over Time',
-            style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
-          ),
-          const SizedBox(height: 4),
-          Text('Attendance figures for the last 6 major department events.', style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
-          const SizedBox(height: 32),
-          // Mock Bar Chart
-          SizedBox(
-            height: 180,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _bar(0.4, 'Mar 10', '120'),
-                _bar(0.6, 'Apr 02', '180'),
-                _bar(0.3, 'May 15', '90'),
-                _bar(0.7, 'Jul 05', '210'),
-                _bar(0.8, 'Aug 10', '240'),
-                _bar(0.5, 'Sep 15', '150'),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _bar(double heightFactor, String label, String value) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.end,
-      children: [
-        Text(value, style: GoogleFonts.robotoMono(fontSize: 10, color: AppColors.textTertiary, fontWeight: FontWeight.w600)),
-        const SizedBox(height: 8),
-        AnimatedContainer(
-          duration: const Duration(milliseconds: 800),
-          curve: Curves.easeOutQuart,
-          width: 40,
-          height: 120 * heightFactor,
-          decoration: BoxDecoration(
-            color: AppColors.accent,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
-            gradient: LinearGradient(
-              begin: Alignment.bottomCenter,
-              end: Alignment.topCenter,
-              colors: [
-                AppColors.accent.withValues(alpha: 0.5),
-                AppColors.accent,
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        Text(label, style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textSecondary, fontWeight: FontWeight.w500)),
-      ],
-    );
-  }
-
-  // ─── Feedback Sentiment ───────────────────────────────────────────
-  Widget _buildFeedbackSentiment() {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.primaryContainer,
-        borderRadius: AppRadius.borderRadiusLg,
-        border: Border.all(color: AppColors.accent.withValues(alpha: 0.3)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Header
-          Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Feedback Sentiment Analysis',
-                      style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
-                    ),
-                    const SizedBox(height: 4),
-                    Text('Auto-analyzed from post-event student surveys.', style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
-                  ],
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: const BoxDecoration(
-                    gradient: AppColors.aiBadgeGradient,
-                    borderRadius: BorderRadius.all(Radius.circular(999)),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.auto_awesome_rounded, size: 12, color: Colors.white),
-                      const SizedBox(width: 4),
-                      Text('AI-ANALYZED', style: GoogleFonts.poppins(fontSize: 9, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: 0.5)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          
-          // List
-          Container(
-            decoration: BoxDecoration(
-              color: AppColors.surfaceElevated,
-              borderRadius: const BorderRadius.vertical(bottom: Radius.circular(AppRadius.lg)),
-              border: const Border(top: BorderSide(color: AppColors.border)),
-            ),
-            child: Column(
-              children: _sentiments.map((s) => _buildSentimentRow(s)).toList(),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSentimentRow(Map<String, dynamic> data) {
-    final bool isExpanded = data['isExpanded'];
-    final int pos = data['positive'];
-    final int neu = data['neutral'];
-    final int neg = data['negative'];
-
-    return Container(
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: AppColors.border)),
-      ),
-      child: Column(
-        children: [
-          InkWell(
-            onTap: () {
-              setState(() {
-                data['isExpanded'] = !isExpanded;
-              });
-            },
-            child: Padding(
-              padding: const EdgeInsets.all(20.0),
-              child: Row(
+              Row(
                 children: [
-                  Expanded(
-                    flex: 4,
-                    child: Text(
-                      data['event'],
-                      style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: AppColors.textPrimary, fontSize: 14),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    flex: 6,
-                    child: Column(
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(flex: pos, child: Container(height: 8, decoration: BoxDecoration(color: AppColors.success, borderRadius: BorderRadius.horizontal(left: const Radius.circular(4), right: Radius.circular(neu == 0 && neg == 0 ? 4 : 0))))),
-                            if (neu > 0) Expanded(flex: neu, child: Container(height: 8, color: AppColors.warning)),
-                            if (neg > 0) Expanded(flex: neg, child: Container(height: 8, decoration: BoxDecoration(color: AppColors.error, borderRadius: BorderRadius.horizontal(right: const Radius.circular(4), left: Radius.circular(pos == 0 && neu == 0 ? 4 : 0))))),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text('$pos% Pos', style: GoogleFonts.poppins(fontSize: 10, color: AppColors.success, fontWeight: FontWeight.w600)),
-                            if (neu > 0) Text('$neu% Neu', style: GoogleFonts.poppins(fontSize: 10, color: AppColors.warning, fontWeight: FontWeight.w600)),
-                            if (neg > 0) Text('$neg% Neg', style: GoogleFonts.poppins(fontSize: 10, color: AppColors.error, fontWeight: FontWeight.w600)),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Icon(isExpanded ? Icons.expand_less_rounded : Icons.expand_more_rounded, color: AppColors.textTertiary),
+                  Flexible(child: Text(label, style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary))),
+                  if (ai) ...[const SizedBox(width: 4), const AiBadge()],
                 ],
               ),
-            ),
+              Text(value, style: GoogleFonts.poppins(fontSize: 24, fontWeight: FontWeight.w800)),
+            ],
           ),
-          if (isExpanded)
-            Container(
-              color: AppColors.primaryContainer,
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-              child: Column(
-                children: (data['comments'] as List).map((c) {
-                  IconData icon;
-                  Color color;
-                  if (c['type'] == 'pos') {
-                    icon = Icons.sentiment_very_satisfied_rounded;
-                    color = AppColors.success;
-                  } else if (c['type'] == 'neg') {
-                    icon = Icons.sentiment_very_dissatisfied_rounded;
-                    color = AppColors.error;
-                  } else {
-                    icon = Icons.sentiment_neutral_rounded;
-                    color = AppColors.warning;
-                  }
-                  
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 12.0),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(icon, size: 16, color: color),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            '"${c['text']}"',
-                            style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary, fontStyle: FontStyle.italic),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }).toList(),
+        ),
+      ),
+    );
+  }
+
+  Widget _eventCard(EventDoc event) {
+    final sentiment = event.sentimentPercentages;
+    final running = _running.contains(event.id);
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            InkWell(
+              onTap: () => context.push('/events/${event.id}'),
+              child: Text(event.title, style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w700)),
+            ),
+            Text(
+              '${formatEventDate(event.eventDate)} · ${event.filledSeats}/${event.totalSeats} registered',
+              style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 12),
+            if (sentiment != null) ...[
+              Row(children: [
+                Text('Feedback sentiment', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600)),
+                const SizedBox(width: 6),
+                const AiBadge(),
+              ]),
+              const SizedBox(height: 8),
+              ClipRRect(
+                borderRadius: AppRadius.borderRadiusFull,
+                child: SizedBox(
+                  height: 10,
+                  child: Row(
+                    children: [
+                      for (final (key, color) in [
+                        ('positive', AppColors.success),
+                        ('neutral', AppColors.warning),
+                        ('negative', AppColors.error),
+                      ])
+                        if ((sentiment[key] ?? 0) > 0)
+                          Expanded(flex: sentiment[key]!, child: Container(color: color)),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '${sentiment['positive'] ?? 0}% positive · ${sentiment['neutral'] ?? 0}% neutral · ${sentiment['negative'] ?? 0}% negative',
+                style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary),
+              ),
+              const SizedBox(height: 8),
+            ],
+            Align(
+              alignment: Alignment.centerRight,
+              child: OutlinedButton.icon(
+                onPressed: running ? null : () => _runRollup(event),
+                icon: running
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.auto_awesome_rounded, size: 16),
+                label: Text(sentiment == null ? 'Run sentiment rollup' : 'Refresh sentiment'),
               ),
             ),
-        ],
+          ],
+        ),
       ),
     );
   }

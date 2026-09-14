@@ -1,447 +1,444 @@
-import 'dart:convert';
-import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
-import '../../core/theme/app_tokens.dart';
+import 'dart:typed_data';
 
-class EventCreationScreen extends StatefulWidget {
-  const EventCreationScreen({super.key});
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
+
+import '../../core/theme/app_tokens.dart';
+import '../../features/auth/data/user_doc.dart';
+import '../../models/event_model.dart';
+import '../../models/firestore/event_doc.dart';
+import '../../services/firebase_service.dart';
+import '../../utils/friendly_error.dart';
+import '../../utils/image_upload.dart';
+import '../events_hub_screen.dart' show formatEventDate;
+import 'admin_staff_provisioning_view.dart' show kClubs;
+
+const _eventTags = ['Workshop', 'Hackathon', 'Seminar', 'Talk', 'Competition', 'Cultural', 'General'];
+
+/// Event Builder (coordinators + HOD): details, schedule, capacity, banner
+/// and a custom registration form. Pass [eventId] to edit an existing event.
+class EventCreationScreen extends ConsumerStatefulWidget {
+  final String? eventId;
+  const EventCreationScreen({super.key, this.eventId});
 
   @override
-  State<EventCreationScreen> createState() => _EventCreationScreenState();
+  ConsumerState<EventCreationScreen> createState() => _EventCreationScreenState();
 }
 
-class _EventCreationScreenState extends State<EventCreationScreen> {
-  int _currentStep = 0;
+class _EventCreationScreenState extends ConsumerState<EventCreationScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _titleController = TextEditingController();
+  final _descriptionController = TextEditingController();
+  final _venueController = TextEditingController();
+  final _capacityController = TextEditingController(text: '50');
 
-  // Basic Info
-  final _titleController = TextEditingController(text: 'Introduction to GenAI');
-  final _venueController = TextEditingController(text: 'Main Seminar Hall');
-  String _selectedDate = 'Oct 15, 2026';
-  String _selectedTime = '10:00 AM';
-
-  // Capacity & Deadline
-  double _seatCap = 50;
-  String _deadlineDate = 'Oct 12, 2026';
-
-  // Dynamic Form Builder
-  List<Map<String, dynamic>> _formFields = [
-    {'type': 'short_text', 'label': 'Full Name', 'required': true},
-    {'type': 'short_text', 'label': 'USN', 'required': true},
-    {'type': 'dropdown', 'label': 'Semester', 'options': ['4th', '6th', '8th'], 'required': true},
+  String _tag = _eventTags.first;
+  String? _club;
+  DateTime? _start;
+  DateTime? _end;
+  DateTime? _deadline;
+  List<RegistrationField> _fields = const [
+    RegistrationField(label: 'Full Name'),
+    RegistrationField(label: 'Phone', type: FieldType.phone),
   ];
+
+  XFile? _banner;
+  Uint8List? _bannerPreview;
+  String? _existingBannerUrl;
+  int _currentRegistrations = 0;
+
+  bool _loading = false;
+  bool _saving = false;
+
+  bool get _isEdit => widget.eventId != null;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_isEdit) _loadEvent();
+  }
 
   @override
   void dispose() {
     _titleController.dispose();
+    _descriptionController.dispose();
     _venueController.dispose();
+    _capacityController.dispose();
     super.dispose();
   }
 
-  void _addFormField() {
-    setState(() {
-      _formFields.add({
-        'type': 'short_text',
-        'label': 'New Question',
-        'required': false,
+  Future<void> _loadEvent() async {
+    setState(() => _loading = true);
+    try {
+      final snap = await EventDoc.docRef(widget.eventId!).get();
+      if (!snap.exists) throw Exception('Event not found.');
+      final event = EventDoc.fromFirestore(snap);
+      setState(() {
+        _titleController.text = event.title;
+        _descriptionController.text = event.description;
+        _venueController.text = event.venue;
+        _capacityController.text = '${event.maxCapacity}';
+        _tag = _eventTags.contains(event.tag) ? event.tag : 'General';
+        _club = event.club;
+        _start = event.eventDate;
+        _end = event.endDate;
+        _deadline = event.registrationDeadline;
+        _fields = event.formFields;
+        _existingBannerUrl = event.bannerUrl;
+        _currentRegistrations = event.currentRegistrations;
       });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(friendlyError(e)), backgroundColor: AppColors.error),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<DateTime?> _pickDateTime(DateTime? initial) async {
+    final now = DateTime.now();
+    final date = await showDatePicker(
+      context: context,
+      initialDate: initial ?? now.add(const Duration(days: 7)),
+      firstDate: _isEdit ? DateTime(now.year - 1) : now,
+      lastDate: now.add(const Duration(days: 730)),
+    );
+    if (date == null || !mounted) return null;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(initial ?? DateTime(date.year, date.month, date.day, 10)),
+    );
+    if (time == null) return null;
+    return DateTime(date.year, date.month, date.day, time.hour, time.minute);
+  }
+
+  Future<void> _pickBanner() async {
+    final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 80, maxWidth: 2000);
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
+    setState(() {
+      _banner = picked;
+      _bannerPreview = bytes;
     });
   }
 
-  String get _liveJsonPreview {
-    final Map<String, dynamic> schema = {
-      'event_title': _titleController.text,
-      'venue': _venueController.text,
-      'datetime': '$_selectedDate $_selectedTime',
-      'capacity': _seatCap.toInt(),
-      'deadline': _deadlineDate,
-      'registration_schema': _formFields,
-    };
-    return const JsonEncoder.withIndent('  ').convert(schema);
+  Future<void> _save(UserDoc user) async {
+    if (!_formKey.currentState!.validate()) return;
+
+    String? problem;
+    if (_start == null) {
+      problem = 'Pick the event start date and time.';
+    } else if (_end != null && !_end!.isAfter(_start!)) {
+      problem = 'The end time must be after the start time.';
+    } else if ((_deadline ?? _start!).isAfter(_start!)) {
+      problem = 'Registration must close before the event starts.';
+    } else if (_fields.any((f) => f.label.trim().isEmpty)) {
+      problem = 'Every registration question needs a label.';
+    } else if (_fields.any((f) => f.type == FieldType.dropdown && f.options.isEmpty)) {
+      problem = 'Dropdown questions need at least one option.';
+    }
+    if (problem != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(problem), backgroundColor: AppColors.error));
+      return;
+    }
+
+    setState(() => _saving = true);
+    try {
+      final banner = _banner;
+      final bannerUrl = banner == null
+          ? _existingBannerUrl
+          : await uploadImage(banner, 'events/${user.uid}/${uniqueImageName(banner)}');
+      final club = user.role == UserRole.coordinator ? user.club : _club;
+      final data = EventDoc.newEventData(
+        title: _titleController.text.trim(),
+        description: _descriptionController.text.trim(),
+        venue: _venueController.text.trim(),
+        eventDate: _start!,
+        endDate: _end,
+        maxCapacity: int.parse(_capacityController.text.trim()),
+        registrationDeadline: _deadline ?? _start!,
+        formFields: _fields,
+        tag: _tag,
+        club: club,
+        bannerUrl: bannerUrl,
+        createdBy: user.uid,
+      );
+
+      if (_isEdit) {
+        // Never touch ownership or the live registration counter on edit.
+        data
+          ..remove('createdBy')
+          ..remove('currentRegistrations')
+          ..remove('createdAt');
+        await EventDoc.docRef(widget.eventId!).update(data);
+      } else {
+        await EventDoc.collection.add(data);
+      }
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_isEdit ? 'Event updated' : 'Event published'), backgroundColor: AppColors.success),
+      );
+      context.pop();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(friendlyError(e)), backgroundColor: AppColors.error),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final user = ref.watch(currentUserDocProvider).valueOrNull;
+
     return Scaffold(
-      backgroundColor: AppColors.primarySurface,
-      appBar: AppBar(
-        backgroundColor: AppColors.primarySurface,
-        elevation: 0,
-        iconTheme: const IconThemeData(color: AppColors.textPrimary),
-        title: Text(
-          'Create New Event',
-          style: GoogleFonts.poppins(
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-            color: AppColors.textPrimary,
-          ),
-        ),
-      ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final isLargeScreen = constraints.maxWidth > 800;
-          
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Main Stepper Area
-              Expanded(
-                flex: 2,
-                child: Stepper(
-                  currentStep: _currentStep,
-                  onStepContinue: () {
-                    if (_currentStep < 2) {
-                      setState(() => _currentStep += 1);
-                    } else {
-                      // Submit event
-                      Navigator.of(context).pop();
-                    }
-                  },
-                  onStepCancel: () {
-                    if (_currentStep > 0) {
-                      setState(() => _currentStep -= 1);
-                    }
-                  },
-                  controlsBuilder: (context, details) {
-                    return Padding(
-                      padding: const EdgeInsets.only(top: 24.0),
-                      child: Row(
-                        children: [
-                          ElevatedButton(
-                            onPressed: details.onStepContinue,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.accent,
-                              foregroundColor: AppColors.primary,
-                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                            ),
-                            child: Text(
-                              _currentStep == 2 ? 'Publish Event' : 'Continue',
-                              style: GoogleFonts.poppins(fontWeight: FontWeight.w700),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          if (_currentStep > 0)
-                            TextButton(
-                              onPressed: details.onStepCancel,
-                              child: Text(
-                                'Back',
-                                style: GoogleFonts.poppins(color: AppColors.textSecondary),
-                              ),
-                            ),
-                        ],
-                      ),
-                    );
-                  },
-                  steps: [
-                    Step(
-                      title: Text('Basic Info', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                      content: _buildStep1BasicInfo(),
-                      isActive: _currentStep >= 0,
-                      state: _currentStep > 0 ? StepState.complete : StepState.indexed,
-                    ),
-                    Step(
-                      title: Text('Capacity & Deadline', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                      content: _buildStep2Capacity(),
-                      isActive: _currentStep >= 1,
-                      state: _currentStep > 1 ? StepState.complete : StepState.indexed,
-                    ),
-                    Step(
-                      title: Text('Dynamic Form Builder', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-                      content: _buildStep3FormBuilder(),
-                      isActive: _currentStep >= 2,
-                    ),
-                  ],
-                ),
-              ),
-              
-              // JSON Preview Panel for Large Screens
-              if (isLargeScreen)
-                Expanded(
-                  flex: 1,
-                  child: Container(
-                    margin: const EdgeInsets.fromLTRB(0, 24, 24, 24),
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceElevated,
-                      borderRadius: AppRadius.borderRadiusLg,
-                      border: Border.all(color: AppColors.border),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: const BoxDecoration(
-                            border: Border(bottom: BorderSide(color: AppColors.border)),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.code_rounded, color: AppColors.accent, size: 20),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Live JSON Schema',
-                                style: GoogleFonts.poppins(
-                                  fontWeight: FontWeight.w700,
-                                  color: AppColors.textPrimary,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Expanded(
-                          child: SingleChildScrollView(
-                            padding: const EdgeInsets.all(16),
-                            child: Text(
-                              _liveJsonPreview,
-                              style: GoogleFonts.robotoMono(
-                                fontSize: 12,
-                                color: AppColors.textSecondary,
-                                height: 1.5,
-                              ),
-                            ),
-                          ),
-                        ),
+      appBar: AppBar(title: Text(_isEdit ? 'Edit Event' : 'Create Event')),
+      body: user == null || _loading
+          ? const Center(child: CircularProgressIndicator())
+          : Form(
+              key: _formKey,
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
+                children: [
+                  _section('Basic info'),
+                  TextFormField(
+                    controller: _titleController,
+                    maxLength: 120,
+                    decoration: const InputDecoration(labelText: 'Event title'),
+                    validator: (v) => (v ?? '').trim().length < 3 ? 'Title is required' : null,
+                  ),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _descriptionController,
+                    minLines: 3,
+                    maxLines: 8,
+                    maxLength: 3000,
+                    decoration: const InputDecoration(labelText: 'Description', alignLabelWithHint: true),
+                    validator: (v) => (v ?? '').trim().isEmpty ? 'Description is required' : null,
+                  ),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _venueController,
+                    decoration: const InputDecoration(labelText: 'Venue'),
+                    validator: (v) => (v ?? '').trim().isEmpty ? 'Venue is required' : null,
+                  ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
+                    initialValue: _tag,
+                    decoration: const InputDecoration(labelText: 'Category'),
+                    items: [for (final t in _eventTags) DropdownMenuItem(value: t, child: Text(t))],
+                    onChanged: (v) => setState(() => _tag = v ?? _tag),
+                  ),
+                  const SizedBox(height: 16),
+                  if (user.role == UserRole.hod)
+                    DropdownButtonFormField<String?>(
+                      initialValue: _club,
+                      decoration: const InputDecoration(labelText: 'Club (optional)'),
+                      items: [
+                        const DropdownMenuItem(value: null, child: Text('Department (no club)')),
+                        for (final c in kClubs) DropdownMenuItem(value: c, child: Text(c)),
                       ],
+                      onChanged: (v) => setState(() => _club = v),
+                    )
+                  else
+                    Text(
+                      'Organised by ${user.club ?? 'your club'}',
+                      style: GoogleFonts.poppins(color: AppColors.textSecondary),
+                    ),
+                  const SizedBox(height: 24),
+                  _section('Schedule & capacity'),
+                  _dateTile('Starts', _start, required: true, onPick: (d) => setState(() => _start = d)),
+                  _dateTile('Ends (optional)', _end, onPick: (d) => setState(() => _end = d),
+                      onClear: () => setState(() => _end = null)),
+                  _dateTile('Registration closes', _deadline ?? _start,
+                      onPick: (d) => setState(() => _deadline = d)),
+                  const SizedBox(height: 8),
+                  TextFormField(
+                    controller: _capacityController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Seat capacity'),
+                    validator: (v) {
+                      final n = int.tryParse((v ?? '').trim());
+                      if (n == null || n < 1) return 'Enter a capacity of at least 1';
+                      if (n < _currentRegistrations) return '$_currentRegistrations students already registered';
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 24),
+                  _section('Banner (optional)'),
+                  GestureDetector(
+                    onTap: _pickBanner,
+                    child: AspectRatio(
+                      aspectRatio: 16 / 9,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: AppColors.primaryContainer,
+                          borderRadius: AppRadius.borderRadiusLg,
+                          border: Border.all(color: AppColors.border),
+                          image: _bannerPreview != null
+                              ? DecorationImage(image: MemoryImage(_bannerPreview!), fit: BoxFit.cover)
+                              : _existingBannerUrl != null
+                                  ? DecorationImage(image: NetworkImage(_existingBannerUrl!), fit: BoxFit.cover)
+                                  : null,
+                        ),
+                        child: _bannerPreview == null && _existingBannerUrl == null
+                            ? const Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.cloud_upload_outlined, color: AppColors.accent, size: 32),
+                                    SizedBox(height: 8),
+                                    Text('Tap to upload a 16:9 banner'),
+                                  ],
+                                ),
+                              )
+                            : null,
+                      ),
                     ),
                   ),
-                ),
-            ],
-          );
+                  const SizedBox(height: 24),
+                  _section('Registration form'),
+                  Text(
+                    'Questions students answer when they register.',
+                    style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary),
+                  ),
+                  const SizedBox(height: 12),
+                  for (var i = 0; i < _fields.length; i++) _FieldEditor(
+                    key: ValueKey('field_$i'),
+                    field: _fields[i],
+                    onChanged: (f) => setState(() => _fields = [..._fields]..[i] = f),
+                    onRemove: () => setState(() => _fields = [..._fields]..removeAt(i)),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: () => setState(() => _fields = [..._fields, const RegistrationField(label: '')]),
+                    icon: const Icon(Icons.add_rounded),
+                    label: const Text('Add question'),
+                  ),
+                  const SizedBox(height: 32),
+                  ElevatedButton(
+                    onPressed: _saving ? null : () => _save(user),
+                    style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
+                    child: _saving
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          )
+                        : Text(_isEdit ? 'Save changes' : 'Publish event'),
+                  ),
+                ],
+              ),
+            ),
+    );
+  }
+
+  Widget _section(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Text(title, style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700)),
+    );
+  }
+
+  Widget _dateTile(
+    String label,
+    DateTime? value, {
+    bool required = false,
+    required ValueChanged<DateTime> onPick,
+    VoidCallback? onClear,
+  }) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        leading: const Icon(Icons.calendar_today_outlined, color: AppColors.accent),
+        title: Text(label),
+        subtitle: Text(
+          value == null ? (required ? 'Required — tap to choose' : 'Not set') : formatEventDate(value),
+          style: TextStyle(color: value == null && required ? AppColors.error : null),
+        ),
+        trailing: value != null && onClear != null
+            ? IconButton(tooltip: 'Clear', icon: const Icon(Icons.clear), onPressed: onClear)
+            : const Icon(Icons.chevron_right_rounded),
+        onTap: () async {
+          final picked = await _pickDateTime(value);
+          if (picked != null) onPick(picked);
         },
       ),
     );
   }
+}
 
-  // ─── Step 1: Basic Info ───────────────────────────────────────────
-  Widget _buildStep1BasicInfo() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildTextField('Event Title', _titleController),
-        const SizedBox(height: 16),
-        _buildTextField('Venue', _venueController),
-        const SizedBox(height: 16),
-        Row(
+class _FieldEditor extends StatelessWidget {
+  final RegistrationField field;
+  final ValueChanged<RegistrationField> onChanged;
+  final VoidCallback onRemove;
+
+  const _FieldEditor({super.key, required this.field, required this.onChanged, required this.onRemove});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
           children: [
-            Expanded(child: _buildMockPicker('Date', _selectedDate, Icons.calendar_today_rounded)),
-            const SizedBox(width: 16),
-            Expanded(child: _buildMockPicker('Time', _selectedTime, Icons.access_time_rounded)),
-          ],
-        ),
-        const SizedBox(height: 24),
-        Text('Banner Image', style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
-        const SizedBox(height: 8),
-        Container(
-          height: 120,
-          decoration: BoxDecoration(
-            color: AppColors.primaryContainer,
-            borderRadius: AppRadius.borderRadiusMd,
-            border: Border.all(color: AppColors.border, style: BorderStyle.solid),
-          ),
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+            Row(
               children: [
-                const Icon(Icons.cloud_upload_outlined, color: AppColors.accent, size: 32),
-                const SizedBox(height: 8),
-                Text('Tap to upload banner (16:9)', style: GoogleFonts.poppins(color: AppColors.textSecondary, fontSize: 13)),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ─── Step 2: Capacity & Deadline ──────────────────────────────────
-  Widget _buildStep2Capacity() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text('Seat Capacity', style: GoogleFonts.poppins(fontSize: 14, color: AppColors.textPrimary)),
-            Text('${_seatCap.toInt()} Seats', style: GoogleFonts.poppins(fontWeight: FontWeight.w700, color: AppColors.accent)),
-          ],
-        ),
-        Slider(
-          value: _seatCap,
-          min: 10,
-          max: 200,
-          divisions: 19,
-          activeColor: AppColors.accent,
-          inactiveColor: AppColors.primaryContainer,
-          onChanged: (v) => setState(() => _seatCap = v),
-        ),
-        const SizedBox(height: 24),
-        _buildMockPicker('Registration Deadline', _deadlineDate, Icons.event_busy_rounded),
-      ],
-    );
-  }
-
-  // ─── Step 3: Dynamic Form Builder ─────────────────────────────────
-  Widget _buildStep3FormBuilder() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Drag to reorder questions. These will be presented to students when they register.',
-          style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary, height: 1.4),
-        ),
-        const SizedBox(height: 16),
-        Container(
-          decoration: BoxDecoration(
-            border: Border.all(color: AppColors.border),
-            borderRadius: AppRadius.borderRadiusMd,
-            color: AppColors.surfaceElevated,
-          ),
-          child: ReorderableListView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: _formFields.length,
-            onReorder: (oldIndex, newIndex) {
-              setState(() {
-                if (oldIndex < newIndex) {
-                  newIndex -= 1;
-                }
-                final item = _formFields.removeAt(oldIndex);
-                _formFields.insert(newIndex, item);
-              });
-            },
-            itemBuilder: (context, index) {
-              final field = _formFields[index];
-              return _buildFormBlock(
-                key: ValueKey(field),
-                index: index,
-                field: field,
-              );
-            },
-          ),
-        ),
-        const SizedBox(height: 16),
-        OutlinedButton.icon(
-          onPressed: _addFormField,
-          icon: const Icon(Icons.add_rounded, size: 18),
-          label: const Text('Add Question'),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: AppColors.accent,
-            side: const BorderSide(color: AppColors.accent),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildFormBlock({required Key key, required int index, required Map<String, dynamic> field}) {
-    IconData typeIcon;
-    switch (field['type']) {
-      case 'dropdown':
-        typeIcon = Icons.arrow_drop_down_circle_outlined;
-        break;
-      case 'checkbox':
-        typeIcon = Icons.check_box_outlined;
-        break;
-      default:
-        typeIcon = Icons.short_text_rounded;
-    }
-
-    return Container(
-      key: key,
-      padding: const EdgeInsets.all(12),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: AppColors.border)),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.drag_indicator_rounded, color: AppColors.textTertiary, size: 20),
-          const SizedBox(width: 12),
-          Icon(typeIcon, color: AppColors.textSecondary, size: 20),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  field['label'],
-                  style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: AppColors.textPrimary, fontSize: 14),
+                Expanded(
+                  child: TextFormField(
+                    initialValue: field.label,
+                    decoration: const InputDecoration(labelText: 'Question', isDense: true),
+                    onChanged: (v) => onChanged(field.copyWith(label: v)),
+                  ),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  field['type'].toString().toUpperCase(),
-                  style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: AppColors.textTertiary, fontSize: 10, letterSpacing: 0.5),
+                IconButton(
+                  tooltip: 'Remove question',
+                  icon: const Icon(Icons.delete_outline, color: AppColors.error),
+                  onPressed: onRemove,
                 ),
               ],
             ),
-          ),
-          Switch(
-            value: field['required'],
-            onChanged: (v) {
-              setState(() {
-                field['required'] = v;
-              });
-            },
-            activeColor: AppColors.primary,
-            activeTrackColor: AppColors.accent,
-            inactiveTrackColor: AppColors.primaryContainer,
-          ),
-          IconButton(
-            icon: const Icon(Icons.delete_outline_rounded, color: AppColors.error, size: 20),
-            onPressed: () {
-              setState(() {
-                _formFields.removeAt(index);
-              });
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ─── Helpers ──────────────────────────────────────────────────────
-  Widget _buildTextField(String label, TextEditingController controller) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
-        const SizedBox(height: 6),
-        TextField(
-          controller: controller,
-          onChanged: (_) => setState(() {}),
-          style: GoogleFonts.poppins(color: AppColors.textPrimary, fontSize: 14),
-          decoration: InputDecoration(
-            filled: true,
-            fillColor: AppColors.surfaceElevated,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            border: OutlineInputBorder(borderRadius: AppRadius.borderRadiusSm, borderSide: const BorderSide(color: AppColors.border)),
-            enabledBorder: OutlineInputBorder(borderRadius: AppRadius.borderRadiusSm, borderSide: const BorderSide(color: AppColors.border)),
-            focusedBorder: OutlineInputBorder(borderRadius: AppRadius.borderRadiusSm, borderSide: const BorderSide(color: AppColors.accent)),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildMockPicker(String label, String value, IconData icon) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary)),
-        const SizedBox(height: 6),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          decoration: BoxDecoration(
-            color: AppColors.surfaceElevated,
-            borderRadius: AppRadius.borderRadiusSm,
-            border: Border.all(color: AppColors.border),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(value, style: GoogleFonts.poppins(color: AppColors.textPrimary, fontSize: 14)),
-              Icon(icon, size: 18, color: AppColors.textTertiary),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<FieldType>(
+                    initialValue: field.type,
+                    isDense: true,
+                    decoration: const InputDecoration(labelText: 'Answer type', isDense: true),
+                    items: [
+                      for (final t in FieldType.values)
+                        DropdownMenuItem(value: t, child: Text(t.name[0].toUpperCase() + t.name.substring(1))),
+                    ],
+                    onChanged: (t) => onChanged(field.copyWith(type: t)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Text('Required'),
+                Switch(value: field.isRequired, onChanged: (v) => onChanged(field.copyWith(isRequired: v))),
+              ],
+            ),
+            if (field.type == FieldType.dropdown) ...[
+              const SizedBox(height: 8),
+              TextFormField(
+                initialValue: field.options.join(', '),
+                decoration: const InputDecoration(labelText: 'Options (comma separated)', isDense: true),
+                onChanged: (v) => onChanged(field.copyWith(
+                  options: v.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList(),
+                )),
+              ),
             ],
-          ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }

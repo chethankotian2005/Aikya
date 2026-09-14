@@ -1,17 +1,18 @@
-import 'dart:io';
-import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:intl_phone_field/intl_phone_field.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:firebase_storage/firebase_storage.dart';
-import 'package:http/http.dart' as http;
+import 'package:intl_phone_field/intl_phone_field.dart';
 
 import '../../../core/theme/app_tokens.dart';
 import '../../../services/firebase_service.dart';
 import '../../../services/render_api_service.dart';
+import '../../../utils/friendly_error.dart';
+import '../../../utils/image_upload.dart';
+import '../data/user_doc.dart';
 
 class ProfileEditScreen extends ConsumerStatefulWidget {
   const ProfileEditScreen({super.key});
@@ -21,20 +22,13 @@ class ProfileEditScreen extends ConsumerStatefulWidget {
 }
 
 class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
-  final bool _isLoading = false;
-  bool _isSaving = false;
-  final _formKey = GlobalKey<FormState>();
+  bool _saving = false;
+  bool _loaded = false;
 
-  // Read-only fields
-  String _fullName = '';
-  String _usn = '';
-  String _batch = '';
-  String _yearOfStudy = '';
-  String? _currentProfilePictureUrl;
-
-  // Editable fields
   String? _phoneNumber;
+  String? _currentPhotoUrl;
   final _bioController = TextEditingController();
+  final _skillsController = TextEditingController();
   final _githubController = TextEditingController();
   final _linkedinController = TextEditingController();
   final _instagramController = TextEditingController();
@@ -42,833 +36,306 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
   final _twitterController = TextEditingController();
   final _discordController = TextEditingController();
 
-  File? _profileImage;
-  final ImagePicker _picker = ImagePicker();
-  
+  XFile? _image;
+  Uint8List? _preview;
   bool _flagForHodReview = false;
 
-  // Privacy Settings
-  bool _publicBio = true;
-  bool _publicGithub = true;
-  bool _publicLinkedin = true;
-  bool _publicPersonalWebsite = true;
-  bool _publicInstagram = true;
-  bool _publicTwitter = true;
-
-  // Notification Settings
-  bool _eventsEnabled = true;
-  bool _updatesEnabled = true;
-  bool _memoriesEnabled = true;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadUserData();
-    });
-  }
-  
-  void _loadUserData() {
-    final userDoc = ref.read(currentUserDocProvider).value;
-    if (userDoc != null) {
-      setState(() {
-        _fullName = userDoc.fullName;
-        _usn = userDoc.usn;
-        _batch = userDoc.batch ?? 'Unknown';
-        _yearOfStudy = userDoc.yearOfStudy ?? 'Unknown';
-        
-        _currentProfilePictureUrl = userDoc.profilePictureUrl;
-        _phoneNumber = userDoc.phone;
-        
-        if (userDoc.bio != null) _bioController.text = userDoc.bio!;
-        if (userDoc.githubUrl != null) _githubController.text = userDoc.githubUrl!;
-        if (userDoc.linkedinUrl != null) _linkedinController.text = userDoc.linkedinUrl!;
-        if (userDoc.instagramHandle != null) _instagramController.text = userDoc.instagramHandle!;
-        if (userDoc.personalWebsite != null) _websiteController.text = userDoc.personalWebsite!;
-        if (userDoc.twitterHandle != null) _twitterController.text = userDoc.twitterHandle!;
-        if (userDoc.discordHandle != null) _discordController.text = userDoc.discordHandle!;
-
-        _publicBio = userDoc.privacySettings.publicBio;
-        _publicGithub = userDoc.privacySettings.publicGithub;
-        _publicLinkedin = userDoc.privacySettings.publicLinkedin;
-        _publicPersonalWebsite = userDoc.privacySettings.publicPersonalWebsite;
-        _publicInstagram = userDoc.privacySettings.publicInstagram;
-        _publicTwitter = userDoc.privacySettings.publicTwitter;
-
-        _eventsEnabled = userDoc.notificationSettings.eventsEnabled;
-        _updatesEnabled = userDoc.notificationSettings.updatesEnabled;
-        _memoriesEnabled = userDoc.notificationSettings.memoriesEnabled;
-      });
-    }
-  }
+  PrivacySettings _privacy = const PrivacySettings();
+  NotificationSettings _notifications = const NotificationSettings();
 
   @override
   void dispose() {
-    _bioController.dispose();
-    _githubController.dispose();
-    _linkedinController.dispose();
-    _instagramController.dispose();
-    _websiteController.dispose();
-    _twitterController.dispose();
-    _discordController.dispose();
+    for (final c in [
+      _bioController,
+      _skillsController,
+      _githubController,
+      _linkedinController,
+      _instagramController,
+      _websiteController,
+      _twitterController,
+      _discordController,
+    ]) {
+      c.dispose();
+    }
     super.dispose();
   }
 
+  void _load(UserDoc user) {
+    if (_loaded) return;
+    _loaded = true;
+    _currentPhotoUrl = user.profilePictureUrl;
+    _phoneNumber = user.phone;
+    _bioController.text = user.bio ?? '';
+    _skillsController.text = user.skills.join(', ');
+    _githubController.text = user.githubUrl ?? '';
+    _linkedinController.text = user.linkedinUrl ?? '';
+    _instagramController.text = user.instagramHandle ?? '';
+    _websiteController.text = user.personalWebsite ?? '';
+    _twitterController.text = user.twitterHandle ?? '';
+    _discordController.text = user.discordHandle ?? '';
+    _privacy = user.privacySettings;
+    _notifications = user.notificationSettings;
+  }
+
   Future<void> _pickImage(ImageSource source) async {
-    final picked = await _picker.pickImage(source: source, imageQuality: 70);
-    if (picked != null) {
-      setState(() {
-        _profileImage = File(picked.path);
-      });
-    }
+    final picked = await ImagePicker().pickImage(source: source, imageQuality: 70, maxWidth: 1024);
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
+    setState(() {
+      _image = picked;
+      _preview = bytes;
+    });
   }
 
-  void _showImagePickerSheet() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppColors.surfaceElevated,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(
-                  color: AppColors.border,
-                  borderRadius: AppRadius.borderRadiusFull,
-                ),
-              ),
-              Text(
-                'Change Profile Photo',
-                style: GoogleFonts.poppins(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 16),
-              ListTile(
-                leading: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: AppColors.accent.withValues(alpha: 0.1),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.camera_alt_rounded, color: AppColors.accent),
-                ),
-                title: Text('Take Photo', style: GoogleFonts.poppins(fontWeight: FontWeight.w500)),
-                onTap: () {
-                  Navigator.pop(context);
-                  _pickImage(ImageSource.camera);
-                },
-              ),
-              ListTile(
-                leading: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: AppColors.secondary.withValues(alpha: 0.1),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.photo_library_rounded, color: AppColors.secondary),
-                ),
-                title: Text('Choose from Gallery', style: GoogleFonts.poppins(fontWeight: FontWeight.w500)),
-                onTap: () {
-                  Navigator.pop(context);
-                  _pickImage(ImageSource.gallery);
-                },
-              ),
-              const SizedBox(height: 8),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  String? _text(TextEditingController c) => c.text.trim().isEmpty ? null : c.text.trim();
 
-  Future<void> _saveProfile() async {
-    if (!_formKey.currentState!.validate() || _phoneNumber == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Please enter a valid phone number',
-            style: GoogleFonts.poppins(color: Colors.white),
-          ),
-          backgroundColor: AppColors.error,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: AppRadius.borderRadiusSm),
-        ),
-      );
-      return;
-    }
-
-    setState(() => _isSaving = true);
+  Future<void> _save(UserDoc user) async {
+    setState(() => _saving = true);
     try {
-      final user = ref.read(authStateProvider).value;
-      if (user == null) throw Exception("User not found");
+      final image = _image;
+      final photoUrl =
+          image == null ? _currentPhotoUrl : await uploadImage(image, 'profile_pictures/${user.uid}.jpg');
 
-      String? photoUrl = _currentProfilePictureUrl;
-      
-      if (_profileImage != null) {
-        final storageRef = FirebaseStorage.instance.ref().child('profile_pictures/${user.uid}.jpg');
-        await storageRef.putFile(_profileImage!);
-        photoUrl = await storageRef.getDownloadURL();
-      }
+      await ref.read(renderApiServiceProvider).updateProfile({
+        'fullName': user.fullName,
+        if (user.usn.isNotEmpty) 'usn': user.usn,
+        'phone': _phoneNumber,
+        'bio': _text(_bioController),
+        'skills': _skillsController.text.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList(),
+        'githubUrl': _text(_githubController),
+        'linkedinUrl': _text(_linkedinController),
+        'instagramHandle': _text(_instagramController),
+        'personalWebsite': _text(_websiteController),
+        'twitterHandle': _text(_twitterController),
+        'discordHandle': _text(_discordController),
+        'profilePictureUrl': photoUrl,
+        'flagForHodReview': _flagForHodReview,
+        'privacySettings': _privacy.toJson(),
+        'notificationSettings': _notifications.toJson(),
+      });
 
-      final idToken = await user.getIdToken();
-      // Call Render backend API for profile update
-      final response = await http.put(
-        Uri.parse('${RenderApiService.baseUrl}/profile'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $idToken',
-        },
-        body: jsonEncode({
-          'fullName': _fullName,
-          'usn': _usn,
-          'phone': _phoneNumber,
-          'bio': _bioController.text.trim().isEmpty ? null : _bioController.text.trim(),
-          'githubUrl': _githubController.text.trim().isEmpty ? null : _githubController.text.trim(),
-          'linkedinUrl': _linkedinController.text.trim().isEmpty ? null : _linkedinController.text.trim(),
-          'instagramHandle': _instagramController.text.trim().isEmpty ? null : _instagramController.text.trim(),
-          'personalWebsite': _websiteController.text.trim().isEmpty ? null : _websiteController.text.trim(),
-          'twitterHandle': _twitterController.text.trim().isEmpty ? null : _twitterController.text.trim(),
-          'discordHandle': _discordController.text.trim().isEmpty ? null : _discordController.text.trim(),
-          'profilePictureUrl': photoUrl,
-          'flagForHodReview': _flagForHodReview,
-          'privacySettings': {
-            'publicBio': _publicBio,
-            'publicGithub': _publicGithub,
-            'publicLinkedin': _publicLinkedin,
-            'publicPersonalWebsite': _publicPersonalWebsite,
-            'publicInstagram': _publicInstagram,
-            'publicTwitter': _publicTwitter,
-          },
-          'notificationSettings': {
-            'eventsEnabled': _eventsEnabled,
-            'updatesEnabled': _updatesEnabled,
-            'memoriesEnabled': _memoriesEnabled,
-          },
-        }),
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Profile updated'), backgroundColor: AppColors.success),
       );
-
-      if (response.statusCode != 200) {
-        throw Exception('Failed to update profile: ${response.body}');
-      }
-
-      // Invalidate the user doc cache so the profile screen refreshes
-      ref.invalidate(currentUserDocProvider);
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
-                const SizedBox(width: 8),
-                Text(
-                  'Profile updated successfully!',
-                  style: GoogleFonts.poppins(color: Colors.white),
-                ),
-              ],
-            ),
-            backgroundColor: AppColors.success,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: AppRadius.borderRadiusSm),
-          ),
-        );
-        context.pop();
-      }
+      context.pop();
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.error_outline_rounded, color: Colors.white, size: 18),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Error: ${e.toString()}',
-                    style: GoogleFonts.poppins(color: Colors.white),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-            backgroundColor: AppColors.error,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: AppRadius.borderRadiusSm),
-          ),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isSaving = false);
-      }
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(friendlyError(e)), backgroundColor: AppColors.error),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.primarySurface,
-      body: SafeArea(
-        bottom: false,
-        child: Column(
-          children: [
-            _buildAppBar(),
-            Expanded(
-              child: _isLoading
-                  ? const Center(child: CircularProgressIndicator(color: AppColors.accent))
-                  : SingleChildScrollView(
-                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 40),
-                      child: Form(
-                        key: _formKey,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            _buildProfilePictureSection(),
-                            const SizedBox(height: 28),
-                            _buildSectionHeader('Identity & Academic Info', Icons.school_rounded),
-                            const SizedBox(height: 12),
-                            _buildLockedFieldCard(),
-                            const SizedBox(height: 24),
-                            _buildSectionHeader('Contact & Bio', Icons.person_rounded),
-                            const SizedBox(height: 12),
-                            _buildContactBioCard(),
-                            const SizedBox(height: 24),
-                            _buildSectionHeader('Social Links', Icons.link_rounded),
-                            const SizedBox(height: 12),
-                            _buildSocialLinksCard(),
-                            const SizedBox(height: 24),
-                            _buildSectionHeader('Privacy Settings', Icons.security_rounded),
-                            const SizedBox(height: 12),
-                            _buildPrivacySettingsCard(),
-                            const SizedBox(height: 24),
-                            _buildSectionHeader('Notification Settings', Icons.notifications_rounded),
-                            const SizedBox(height: 12),
-                            _buildNotificationSettingsCard(),
-                            const SizedBox(height: 32),
-                            _buildSaveButton(),
-                            const SizedBox(height: 32),
-                          ],
-                        ),
-                      ),
-                    ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+    final user = ref.watch(currentUserDocProvider).valueOrNull;
+    if (user == null) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    _load(user);
 
-  // ─── App Bar ──────────────────────────────────────────────────────
-  Widget _buildAppBar() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
-      child: Row(
+    final isStudent = user.role == UserRole.student;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Edit Profile')),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
         children: [
-          GestureDetector(
-            onTap: () => context.pop(),
-            child: Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: AppColors.surfaceElevated,
-                borderRadius: AppRadius.borderRadiusSm,
-                border: Border.all(color: AppColors.border),
+          _buildPhoto(user),
+          const SizedBox(height: 24),
+          _section('Identity', Icons.school_rounded),
+          _card([
+            _locked('Full name', user.fullName),
+            if (isStudent) _locked('USN', user.usn),
+            if (isStudent) _locked('Batch', '${user.yearOfStudy ?? '-'} Year · ${user.batch ?? 'Pending review'}'),
+            if (!isStudent) _locked('Role', [user.role.label, if (user.club != null) user.club].join(' · ')),
+            if (isStudent)
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _flagForHodReview,
+                onChanged: (v) => setState(() => _flagForHodReview = v ?? false),
+                title: const Text('Name, USN or batch wrong? Flag for HOD review'),
               ),
-              child: const Icon(Icons.arrow_back_rounded,
-                  size: 20, color: AppColors.textSecondary),
+          ]),
+          const SizedBox(height: 24),
+          _section('Contact & bio', Icons.person_rounded),
+          _card([
+            IntlPhoneField(
+              decoration: const InputDecoration(labelText: 'Phone number'),
+              initialCountryCode: 'IN',
+              initialValue: _phoneNumber?.replaceFirst('+91', ''),
+              onChanged: (phone) => _phoneNumber = phone.completeNumber,
             ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Text(
-              'Edit Profile',
-              style: GoogleFonts.poppins(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: AppColors.textPrimary,
+            TextField(
+              controller: _bioController,
+              maxLines: 3,
+              maxLength: 150,
+              decoration: const InputDecoration(labelText: 'Bio — tell us about yourself'),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _skillsController,
+              decoration: const InputDecoration(
+                labelText: 'Skills',
+                hintText: 'Comma separated, e.g. Python, PyTorch, Flutter',
               ),
             ),
+          ]),
+          const SizedBox(height: 24),
+          _section('Social links', Icons.link_rounded),
+          _card([
+            _field(_githubController, 'GitHub URL', Icons.code_rounded),
+            _field(_linkedinController, 'LinkedIn URL', Icons.business_center_rounded),
+            _field(_twitterController, 'X / Twitter handle', Icons.alternate_email_rounded),
+            _field(_discordController, 'Discord handle', Icons.forum_outlined),
+            _field(_instagramController, 'Instagram handle', Icons.camera_alt_rounded),
+            _field(_websiteController, 'Personal website', Icons.language_rounded),
+          ]),
+          const SizedBox(height: 24),
+          _section('Privacy', Icons.security_rounded),
+          _card([
+            _toggle('Public bio', _privacy.publicBio, (v) => _privacy = _privacy.copyWith(publicBio: v)),
+            _toggle('Public GitHub', _privacy.publicGithub, (v) => _privacy = _privacy.copyWith(publicGithub: v)),
+            _toggle('Public LinkedIn', _privacy.publicLinkedin,
+                (v) => _privacy = _privacy.copyWith(publicLinkedin: v)),
+            _toggle('Public Instagram', _privacy.publicInstagram,
+                (v) => _privacy = _privacy.copyWith(publicInstagram: v)),
+            _toggle('Public X / Twitter', _privacy.publicTwitter,
+                (v) => _privacy = _privacy.copyWith(publicTwitter: v)),
+            _toggle('Public website', _privacy.publicPersonalWebsite,
+                (v) => _privacy = _privacy.copyWith(publicPersonalWebsite: v)),
+          ]),
+          const SizedBox(height: 24),
+          _section('Notifications', Icons.notifications_rounded),
+          _card([
+            _toggle('Event & attendance updates', _notifications.eventsEnabled,
+                (v) => _notifications = _notifications.copyWith(eventsEnabled: v)),
+            _toggle('Faculty updates', _notifications.updatesEnabled,
+                (v) => _notifications = _notifications.copyWith(updatesEnabled: v)),
+            _toggle('Memory Wall approvals', _notifications.memoriesEnabled,
+                (v) => _notifications = _notifications.copyWith(memoriesEnabled: v)),
+          ]),
+          const SizedBox(height: 32),
+          ElevatedButton.icon(
+            onPressed: _saving ? null : () => _save(user),
+            style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
+            icon: _saving
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  )
+                : const Icon(Icons.save_rounded),
+            label: const Text('Save profile'),
           ),
         ],
       ),
     );
   }
 
-  // ─── Profile Picture ─────────────────────────────────────────────
-  Widget _buildProfilePictureSection() {
-    final initials = _fullName.isNotEmpty
-        ? _fullName.trim().split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join().toUpperCase()
-        : '??';
+  Widget _buildPhoto(UserDoc user) {
+    final ImageProvider? image = _preview != null
+        ? MemoryImage(_preview!)
+        : (_currentPhotoUrl != null && _currentPhotoUrl!.isNotEmpty ? NetworkImage(_currentPhotoUrl!) : null);
 
     return Center(
       child: Stack(
         children: [
-          Container(
-            width: 100,
-            height: 100,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: AppColors.aiBadgeGradient,
-              border: Border.all(color: AppColors.accent.withValues(alpha: 0.3), width: 3),
-              boxShadow: AppShadows.md,
-              image: _profileImage != null
-                  ? DecorationImage(image: FileImage(_profileImage!), fit: BoxFit.cover)
-                  : (_currentProfilePictureUrl != null && _currentProfilePictureUrl!.isNotEmpty
-                      ? DecorationImage(image: NetworkImage(_currentProfilePictureUrl!), fit: BoxFit.cover)
-                      : null),
-            ),
-            child: (_profileImage == null && (_currentProfilePictureUrl == null || _currentProfilePictureUrl!.isEmpty))
-                ? Center(
-                    child: Text(
-                      initials,
-                      style: GoogleFonts.poppins(
-                        fontSize: 36,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
-                      ),
-                    ),
-                  )
+          CircleAvatar(
+            radius: 50,
+            backgroundColor: AppColors.secondary,
+            backgroundImage: image,
+            child: image == null
+                ? Text(user.initials, style: GoogleFonts.poppins(fontSize: 32, color: Colors.white))
                 : null,
           ),
           Positioned(
-            bottom: 0,
             right: 0,
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: _showImagePickerSheet,
-                borderRadius: BorderRadius.circular(999),
-                child: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: AppColors.accent,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: AppColors.surfaceElevated, width: 3),
-                    boxShadow: AppShadows.sm,
-                  ),
-                  child: const Icon(Icons.camera_alt_rounded, size: 16, color: Colors.white),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ─── Section Header ───────────────────────────────────────────────
-  Widget _buildSectionHeader(String title, IconData icon) {
-    return Row(
-      children: [
-        Icon(icon, size: 18, color: AppColors.accent),
-        const SizedBox(width: 8),
-        Text(
-          title,
-          style: GoogleFonts.poppins(
-            fontSize: 15,
-            fontWeight: FontWeight.w700,
-            color: AppColors.textPrimary,
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ─── Locked Identity Card ─────────────────────────────────────────
-  Widget _buildLockedFieldCard() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceElevated,
-        borderRadius: AppRadius.borderRadiusLg,
-        border: Border.all(color: AppColors.border),
-        boxShadow: AppShadows.sm,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _lockedField('Full Name', _fullName, Icons.badge_rounded),
-          const SizedBox(height: 12),
-          _lockedField('USN', _usn, Icons.numbers_rounded),
-          const SizedBox(height: 12),
-          _lockedField('Batch Status', '$_yearOfStudy, AI & ML, $_batch', Icons.school_rounded),
-          const SizedBox(height: 16),
-          InkWell(
-            onTap: () {
-              setState(() {
-                _flagForHodReview = !_flagForHodReview;
-              });
-            },
-            borderRadius: AppRadius.borderRadiusSm,
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: _flagForHodReview
-                    ? AppColors.success.withValues(alpha: 0.08)
-                    : AppColors.accent.withValues(alpha: 0.06),
-                borderRadius: AppRadius.borderRadiusSm,
-                border: Border.all(
-                  color: _flagForHodReview
-                      ? AppColors.success.withValues(alpha: 0.3)
-                      : AppColors.accent.withValues(alpha: 0.2),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    _flagForHodReview ? Icons.check_circle_rounded : Icons.flag_rounded,
-                    size: 16,
-                    color: _flagForHodReview ? AppColors.success : AppColors.accent,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _flagForHodReview
-                          ? 'Flagged for HOD review. We will manually verify your details.'
-                          : 'Need to update name, USN or batch? Tap to flag for HOD review.',
-                      style: GoogleFonts.poppins(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                        color: _flagForHodReview ? AppColors.success : AppColors.accent,
-                        height: 1.4,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _lockedField(String label, String value, IconData icon) {
-    return Row(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: AppColors.primaryContainer,
-            borderRadius: AppRadius.borderRadiusXs,
-          ),
-          child: Icon(icon, size: 16, color: AppColors.textSecondary),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: GoogleFonts.poppins(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textTertiary,
-                  letterSpacing: 0.5,
-                ),
-              ),
-              Text(
-                value.isNotEmpty ? value : 'N/A',
-                style: GoogleFonts.poppins(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-            ],
-          ),
-        ),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-          decoration: BoxDecoration(
-            color: AppColors.primaryContainer,
-            borderRadius: AppRadius.borderRadiusXs,
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.lock_rounded, size: 10, color: AppColors.textTertiary),
-              const SizedBox(width: 2),
-              Text(
-                'LOCKED',
-                style: GoogleFonts.poppins(
-                  fontSize: 8,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textTertiary,
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ─── Contact & Bio Card ───────────────────────────────────────────
-  Widget _buildContactBioCard() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceElevated,
-        borderRadius: AppRadius.borderRadiusLg,
-        border: Border.all(color: AppColors.border),
-        boxShadow: AppShadows.sm,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          IntlPhoneField(
-            decoration: _styledInputDecoration('Phone Number', Icons.phone_rounded),
-            initialCountryCode: 'IN',
-            initialValue: _phoneNumber?.replaceAll('+91', ''),
-            style: GoogleFonts.poppins(fontSize: 14, color: AppColors.textPrimary),
-            onChanged: (phone) {
-              _phoneNumber = phone.completeNumber;
-            },
-          ),
-          const SizedBox(height: 12),
-          TextFormField(
-            controller: _bioController,
-            decoration: _styledInputDecoration('Bio — tell us about yourself', Icons.edit_note_rounded),
-            style: GoogleFonts.poppins(fontSize: 14, color: AppColors.textPrimary),
-            maxLines: 3,
-            maxLength: 150,
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ─── Social Links Card ────────────────────────────────────────────
-  Widget _buildSocialLinksCard() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceElevated,
-        borderRadius: AppRadius.borderRadiusLg,
-        border: Border.all(color: AppColors.border),
-        boxShadow: AppShadows.sm,
-      ),
-      child: Column(
-        children: [
-          _socialField(_githubController, 'GitHub URL', Icons.code_rounded),
-          const SizedBox(height: 12),
-          _socialField(_linkedinController, 'LinkedIn URL', Icons.business_center_rounded),
-          const SizedBox(height: 12),
-          _socialField(_twitterController, 'Twitter/X Handle', Icons.alternate_email_rounded),
-          const SizedBox(height: 12),
-          _socialField(_discordController, 'Discord Handle', Icons.gamepad_rounded),
-          const SizedBox(height: 12),
-          _socialField(_instagramController, 'Instagram Handle', Icons.camera_alt_rounded),
-          const SizedBox(height: 12),
-          _socialField(_websiteController, 'Personal Website', Icons.language_rounded),
-        ],
-      ),
-    );
-  }
-
-  // ─── Privacy Settings Card ──────────────────────────────────────────
-  Widget _buildPrivacySettingsCard() {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surfaceElevated,
-        borderRadius: AppRadius.borderRadiusLg,
-        border: Border.all(color: AppColors.border),
-        boxShadow: AppShadows.sm,
-      ),
-      child: Column(
-        children: [
-          _privacyToggle(
-            'Public Bio',
-            'Allow other students to see your bio',
-            _publicBio,
-            (val) => setState(() => _publicBio = val),
-          ),
-          const Divider(height: 1, color: AppColors.border),
-          _privacyToggle(
-            'Public GitHub',
-            'Show GitHub link on your profile',
-            _publicGithub,
-            (val) => setState(() => _publicGithub = val),
-          ),
-          const Divider(height: 1, color: AppColors.border),
-          _privacyToggle(
-            'Public LinkedIn',
-            'Show LinkedIn link on your profile',
-            _publicLinkedin,
-            (val) => setState(() => _publicLinkedin = val),
-          ),
-          const Divider(height: 1, color: AppColors.border),
-          _privacyToggle(
-            'Public Instagram',
-            'Show Instagram link on your profile',
-            _publicInstagram,
-            (val) => setState(() => _publicInstagram = val),
-          ),
-          const Divider(height: 1, color: AppColors.border),
-          _privacyToggle(
-            'Public Twitter/X',
-            'Show Twitter link on your profile',
-            _publicTwitter,
-            (val) => setState(() => _publicTwitter = val),
-          ),
-          const Divider(height: 1, color: AppColors.border),
-          _privacyToggle(
-            'Public Website',
-            'Show Personal Website on your profile',
-            _publicPersonalWebsite,
-            (val) => setState(() => _publicPersonalWebsite = val),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ─── Notification Settings Card ──────────────────────────────────────
-  Widget _buildNotificationSettingsCard() {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surfaceElevated,
-        borderRadius: AppRadius.borderRadiusLg,
-        border: Border.all(color: AppColors.border),
-        boxShadow: AppShadows.sm,
-      ),
-      child: Column(
-        children: [
-          _privacyToggle(
-            'Event Notifications',
-            'Get notified about new events',
-            _eventsEnabled,
-            (val) => setState(() => _eventsEnabled = val),
-          ),
-          const Divider(height: 1, color: AppColors.border),
-          _privacyToggle(
-            'Updates Notifications',
-            'Get notified about new faculty updates',
-            _updatesEnabled,
-            (val) => setState(() => _updatesEnabled = val),
-          ),
-          const Divider(height: 1, color: AppColors.border),
-          _privacyToggle(
-            'Memory Notifications',
-            'Get notified when your memory is approved',
-            _memoriesEnabled,
-            (val) => setState(() => _memoriesEnabled = val),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _privacyToggle(String title, String subtitle, bool value, ValueChanged<bool> onChanged) {
-    return SwitchListTile(
-      title: Text(
-        title,
-        style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
-      ),
-      subtitle: Text(
-        subtitle,
-        style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textTertiary),
-      ),
-      value: value,
-      onChanged: onChanged,
-      activeColor: AppColors.accent,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-    );
-  }
-
-  Widget _socialField(TextEditingController controller, String label, IconData icon) {
-    return TextField(
-      controller: controller,
-      decoration: _styledInputDecoration(label, icon),
-      style: GoogleFonts.poppins(fontSize: 14, color: AppColors.textPrimary),
-    );
-  }
-
-  InputDecoration _styledInputDecoration(String label, IconData icon) {
-    return InputDecoration(
-      labelText: label,
-      labelStyle: GoogleFonts.poppins(
-        fontSize: 13,
-        color: AppColors.textTertiary,
-      ),
-      prefixIcon: Icon(icon, size: 20, color: AppColors.textSecondary),
-      filled: true,
-      fillColor: AppColors.primarySurface,
-      border: OutlineInputBorder(
-        borderRadius: AppRadius.borderRadiusSm,
-        borderSide: BorderSide(color: AppColors.border),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: AppRadius.borderRadiusSm,
-        borderSide: BorderSide(color: AppColors.border),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: AppRadius.borderRadiusSm,
-        borderSide: const BorderSide(color: AppColors.accent, width: 1.5),
-      ),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-    );
-  }
-
-  // ─── Save Button ──────────────────────────────────────────────────
-  Widget _buildSaveButton() {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: _isSaving ? null : _saveProfile,
-        borderRadius: AppRadius.borderRadiusSm,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          decoration: BoxDecoration(
-            gradient: _isSaving ? null : AppColors.brandGradient,
-            color: _isSaving ? AppColors.textTertiary : null,
-            borderRadius: AppRadius.borderRadiusSm,
-            boxShadow: _isSaving ? null : AppShadows.accentGlow,
-          ),
-          child: Center(
-            child: _isSaving
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.5,
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                    ),
-                  )
-                : Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+            bottom: 0,
+            child: IconButton.filled(
+              tooltip: 'Change photo',
+              onPressed: () => showModalBottomSheet(
+                context: context,
+                showDragHandle: true,
+                builder: (ctx) => SafeArea(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.save_rounded, size: 18, color: Colors.white),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Save Profile',
-                        style: GoogleFonts.poppins(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
-                          letterSpacing: 0.3,
-                        ),
+                      ListTile(
+                        leading: const Icon(Icons.camera_alt_rounded),
+                        title: const Text('Take photo'),
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _pickImage(ImageSource.camera);
+                        },
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.photo_library_rounded),
+                        title: const Text('Choose from gallery'),
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _pickImage(ImageSource.gallery);
+                        },
                       ),
                     ],
                   ),
+                ),
+              ),
+              icon: const Icon(Icons.camera_alt_rounded, size: 18),
+            ),
           ),
-        ),
+        ],
       ),
+    );
+  }
+
+  Widget _section(String title, IconData icon) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: AppColors.accent),
+          const SizedBox(width: 8),
+          Text(title, style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w700)),
+        ],
+      ),
+    );
+  }
+
+  Widget _card(List<Widget> children) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children),
+      ),
+    );
+  }
+
+  Widget _locked(String label, String value) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      title: Text(label, style: GoogleFonts.poppins(fontSize: 11, color: AppColors.textTertiary)),
+      subtitle: Text(value.isEmpty ? 'N/A' : value, style: GoogleFonts.poppins(fontSize: 14)),
+      trailing: const Icon(Icons.lock_outline, size: 16, color: AppColors.textTertiary),
+    );
+  }
+
+  Widget _field(TextEditingController controller, String label, IconData icon) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: TextField(
+        controller: controller,
+        decoration: InputDecoration(labelText: label, prefixIcon: Icon(icon, size: 20)),
+      ),
+    );
+  }
+
+  Widget _toggle(String title, bool value, ValueChanged<bool> onChanged) {
+    return SwitchListTile(
+      contentPadding: EdgeInsets.zero,
+      title: Text(title, style: GoogleFonts.poppins(fontSize: 14)),
+      value: value,
+      onChanged: (v) => setState(() => onChanged(v)),
     );
   }
 }

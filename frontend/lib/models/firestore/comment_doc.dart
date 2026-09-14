@@ -1,47 +1,48 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-/// Firestore document model for `events/{eventId}/comments/{commentId}`.
-///
-/// `sentimentLabel` and `sentimentScore` are nullable — populated later
-/// by the sentiment analysis endpoint (server-side / Cloud Function).
+import 'firestore_value.dart';
+
+/// Firestore document model for `events/{eventId}/comments/{id}`.
+/// Sentiment fields are written only by the backend's sentiment rollup.
 class CommentDoc {
   final String id;
   final String userId;
+  final String userName;
   final String commentText;
-  final DateTime createdAt;
   final String? sentimentLabel;
-  final double? sentimentScore;
+  final DateTime? createdAt;
 
   const CommentDoc({
     required this.id,
     required this.userId,
+    required this.userName,
     required this.commentText,
-    required this.createdAt,
     this.sentimentLabel,
-    this.sentimentScore,
+    this.createdAt,
   });
 
-  factory CommentDoc.fromFirestore(
-      DocumentSnapshot<Map<String, dynamic>> doc) {
-    final data = doc.data()!;
+  factory CommentDoc.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final data = doc.data() ?? const {};
     return CommentDoc(
       id: doc.id,
-      userId: data['userId'] as String,
-      commentText: data['commentText'] as String,
-      createdAt: (data['createdAt'] as Timestamp).toDate(),
+      userId: data['userId'] as String? ?? '',
+      userName: data['userName'] as String? ?? 'Member',
+      commentText: data['commentText'] as String? ?? '',
       sentimentLabel: data['sentimentLabel'] as String?,
-      sentimentScore: (data['sentimentScore'] as num?)?.toDouble(),
+      createdAt: toDateTime(data['createdAt']),
     );
   }
 
-  /// Client-side creation — sentiment fields are omitted (server populates).
-  Map<String, dynamic> toFirestore() {
+  static Map<String, dynamic> newComment({
+    required String userId,
+    required String userName,
+    required String commentText,
+  }) {
     return {
       'userId': userId,
+      'userName': userName,
       'commentText': commentText,
       'createdAt': FieldValue.serverTimestamp(),
-      // sentimentLabel and sentimentScore intentionally omitted —
-      // written by the server-side sentiment endpoint only.
     };
   }
 }

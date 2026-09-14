@@ -39,7 +39,7 @@ class _AdminBatchConfigViewState extends State<AdminBatchConfigView> {
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
-                      value: entryType,
+                      initialValue: entryType,
                       decoration: const InputDecoration(labelText: 'Entry Type'),
                       items: const [
                         DropdownMenuItem(value: 'regular', child: Text('Regular')),
@@ -51,7 +51,7 @@ class _AdminBatchConfigViewState extends State<AdminBatchConfigView> {
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<int>(
-                      value: yearOfStudy,
+                      initialValue: yearOfStudy,
                       decoration: const InputDecoration(labelText: 'Year of Study'),
                       items: const [
                         DropdownMenuItem(value: 1, child: Text('1')),
@@ -202,7 +202,7 @@ class _AdminBatchConfigViewState extends State<AdminBatchConfigView> {
                             Expanded(
                               flex: 2,
                               child: DropdownButtonFormField<int>(
-                                value: config.yearOfStudy,
+                                initialValue: config.yearOfStudy,
                                 decoration: const InputDecoration(
                                   labelText: 'Year',
                                   isDense: true,

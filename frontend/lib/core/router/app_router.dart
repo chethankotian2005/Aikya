@@ -1,201 +1,123 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:flutter/material.dart';
 
-import '../../features/auth/presentation/auth_controller.dart';
-import '../../features/auth/presentation/login_view.dart';
-import '../../features/auth/presentation/signup_view.dart';
-import '../../features/auth/presentation/profile_setup_screen.dart';
-import '../../features/auth/presentation/profile_edit_screen.dart';
+import '../../features/auth/data/user_doc.dart';
 import '../../features/auth/presentation/force_password_reset_screen.dart';
-import '../../services/firebase_service.dart';
-import '../../screens/home_screen.dart';
-import '../../screens/splash_screen.dart';
-import '../../screens/events_hub_screen.dart';
-import '../../screens/create_update_screen.dart';
-import '../../screens/projects_screen.dart';
-import '../../screens/project_detail_screen.dart';
-import '../../screens/alumni_directory_screen.dart';
-import '../../screens/public_profile_screen.dart';
-import '../../screens/profile_screen.dart';
-import '../../models/project_model.dart';
+import '../../features/auth/presentation/login_view.dart';
+import '../../features/auth/presentation/profile_edit_screen.dart';
+import '../../features/auth/presentation/profile_setup_screen.dart';
+import '../../features/auth/presentation/signup_view.dart';
 import '../../screens/admin/admin_report_generator_view.dart';
-import 'router_guards.dart';
+import '../../screens/admin/admin_shell_screen.dart';
+import '../../screens/admin/event_creation_screen.dart';
+import '../../screens/alumni_directory_screen.dart';
+import '../../screens/create_update_screen.dart';
+import '../../screens/event_detail_screen.dart';
+import '../../screens/events_hub_screen.dart';
+import '../../screens/home_screen.dart';
+import '../../screens/memory_wall_screen.dart';
+import '../../screens/profile_screen.dart';
+import '../../screens/project_detail_screen.dart';
+import '../../screens/project_submit_screen.dart';
+import '../../screens/projects_screen.dart';
+import '../../screens/public_profile_screen.dart';
+import '../../screens/splash_screen.dart';
+import '../../services/firebase_service.dart';
 
 class RouterNotifier extends ChangeNotifier {
-  final Ref _ref;
-
-  RouterNotifier(this._ref) {
-    _ref.listen(authStateProvider, (_, __) => notifyListeners());
-    _ref.listen(currentUserDocProvider, (_, __) => notifyListeners());
+  RouterNotifier(Ref ref) {
+    ref.listen(authStateProvider, (_, __) => notifyListeners());
+    ref.listen(currentUserDocProvider, (_, __) => notifyListeners());
   }
 }
 
 final routerNotifierProvider = Provider((ref) => RouterNotifier(ref));
 
+const _publicPaths = {'/login', '/signup'};
+const _onboardingPaths = {'/splash', '/setup', '/force-password-reset'};
+
 final routerProvider = Provider<GoRouter>((ref) {
   final notifier = ref.watch(routerNotifierProvider);
-  
+
   return GoRouter(
     refreshListenable: notifier,
     initialLocation: '/splash',
     redirect: (context, state) {
+      final path = state.matchedLocation;
       final authState = ref.read(authStateProvider);
-      final path = state.uri.toString();
-      final isSplash = path == '/splash';
-      final isLogin = path == '/login';
-      final isSignup = path == '/signup';
-      final isSetup = path == '/setup';
-      
-      // ── Phase 1: Auth still loading → stay on splash ──
-      if (authState.isLoading) {
-        return isSplash ? null : '/splash';
+
+      if (authState.isLoading) return path == '/splash' ? null : '/splash';
+
+      if (authState.valueOrNull == null) {
+        return _publicPaths.contains(path) ? null : '/login';
       }
 
-      final isAuth = authState.valueOrNull != null;
-
-      // ── Phase 2: Not authenticated → go to login ──
-      if (!isAuth) {
-        if (isLogin || isSignup) return null; // already there
-        return '/login';
-      }
-
-      // ── Phase 3: Authenticated — check user doc ──
       final userDocAsync = ref.read(currentUserDocProvider);
-      
-      // User doc still loading → stay on splash (RouterNotifier will
-      // call notifyListeners when it resolves, re-triggering redirect)
-      if (userDocAsync.isLoading) {
-        return isSplash ? null : '/splash';
-      }
+      if (userDocAsync.isLoading) return path == '/splash' ? null : '/splash';
 
-      if (userDocAsync.hasError) {
-        print("Router caught error in userDocProvider: ${userDocAsync.error}");
-      }
-      
-      final userDoc = userDocAsync.valueOrNull;
+      final user = userDocAsync.valueOrNull;
 
-      // ── Phase 4: Forced Password Reset ──
-      if (userDoc != null && userDoc.mustResetPassword) {
+      if (user != null && user.mustResetPassword) {
         return path == '/force-password-reset' ? null : '/force-password-reset';
       }
 
-      // ── Phase 5: No Firestore doc yet (first-time signup) ──
-      // Treat as profile-incomplete — send to setup
-      print("ROUTER DEBUG: userDoc is ${userDoc != null ? 'NOT null' : 'NULL'}, profileComplete is ${userDoc?.profileComplete}");
-      if (userDoc == null || !userDoc.profileComplete) {
-        return isSetup ? null : '/setup';
+      // No profile doc yet (signup is still writing it) or first-run setup pending.
+      if (user == null || !user.profileComplete) {
+        return path == '/setup' ? null : '/setup';
       }
 
-      // ── Phase 6: Profile complete — go to app ──
-      // If they're on a pre-auth screen, redirect to home
-      if (isLogin || isSplash || isSignup || path == '/force-password-reset') return '/home';
-      
-      // If they're on setup but profile is done, go home
-      if (isSetup) return '/home';
+      if (_publicPaths.contains(path) || _onboardingPaths.contains(path)) return '/home';
 
-      // Otherwise, they're navigating to a valid app route — allow it
+      // Client-side role gates — Firestore rules and the backend enforce the same.
+      final role = user.role;
+      if (path.startsWith('/admin') && !role.canBuildEvents) return '/home';
+      if (path == '/create_update' && !role.isStaff) return '/home';
+      if (path == '/projects/new' && role != UserRole.student) return '/projects';
+
       return null;
     },
     routes: [
+      GoRoute(path: '/splash', builder: (_, __) => const SplashScreen()),
+      GoRoute(path: '/login', builder: (_, __) => const LoginView()),
+      GoRoute(path: '/signup', builder: (_, __) => const SignupView()),
+      GoRoute(path: '/setup', builder: (_, __) => const ProfileSetupScreen()),
+      GoRoute(path: '/force-password-reset', builder: (_, __) => const ForcePasswordResetScreen()),
+      GoRoute(path: '/home', builder: (_, __) => const HomeScreen()),
+      GoRoute(path: '/events', builder: (_, __) => const EventsHubScreen()),
       GoRoute(
-        path: '/splash',
-        builder: (context, state) => const SplashScreen(),
+        path: '/events/:id',
+        builder: (_, state) => EventDetailScreen(eventId: state.pathParameters['id']!),
       ),
-      GoRoute(
-        path: '/login',
-        builder: (context, state) => const LoginView(),
-      ),
-      GoRoute(
-        path: '/signup',
-        builder: (context, state) => const SignupView(),
-      ),
-      GoRoute(
-        path: '/setup',
-        builder: (context, state) => const ProfileSetupScreen(),
-      ),
-      GoRoute(
-        path: '/force-password-reset',
-        builder: (context, state) => const ForcePasswordResetScreen(),
-      ),
-      GoRoute(
-        path: '/home',
-        builder: (context, state) => const HomeScreen(),
-      ),
-      GoRoute(
-        path: '/events',
-        builder: (context, state) => const EventsHubScreen(),
-      ),
-      GoRoute(
-        path: '/projects',
-        builder: (context, state) => const ProjectsScreen(),
-      ),
+      GoRoute(path: '/projects', builder: (_, __) => const ProjectsScreen()),
+      GoRoute(path: '/projects/new', builder: (_, __) => const ProjectSubmitScreen()),
       GoRoute(
         path: '/projects/detail/:id',
-        builder: (context, state) {
-          final project = state.extra as ProjectModel;
-          return ProjectDetailScreen(project: project);
-        },
+        builder: (_, state) => ProjectDetailScreen(projectId: state.pathParameters['id']!),
       ),
       GoRoute(
         path: '/directory/profile/:uid',
-        builder: (context, state) {
-          final uid = state.pathParameters['uid']!;
-          return PublicProfileScreen(uid: uid);
-        },
+        builder: (_, state) => PublicProfileScreen(uid: state.pathParameters['uid']!),
       ),
-      GoRoute(
-        path: '/alumni',
-        builder: (context, state) => const AlumniDirectoryScreen(),
-      ),
+      GoRoute(path: '/alumni', builder: (_, __) => const AlumniDirectoryScreen()),
+      GoRoute(path: '/memory', builder: (_, __) => const MemoryWallScreen()),
       GoRoute(
         path: '/profile',
-        builder: (context, state) => const ProfileScreen(),
+        builder: (_, __) => const ProfileScreen(),
         routes: [
-          GoRoute(
-            path: 'edit',
-            builder: (context, state) => const ProfileEditScreen(),
-          ),
+          GoRoute(path: 'edit', builder: (_, __) => const ProfileEditScreen()),
         ],
       ),
-      // Add other routes here...
+      GoRoute(path: '/create_update', builder: (_, __) => const CreateUpdateScreen()),
+      GoRoute(path: '/admin', builder: (_, __) => const AdminShellScreen()),
+      GoRoute(path: '/admin/events/new', builder: (_, __) => const EventCreationScreen()),
       GoRoute(
-        path: '/create_update',
-        builder: (context, state) => const CreateUpdateScreen(),
+        path: '/admin/events/edit/:id',
+        builder: (_, state) => EventCreationScreen(eventId: state.pathParameters['id']),
       ),
       GoRoute(
         path: '/admin/report',
-        builder: (context, state) {
-          final eventId = state.extra as String?;
-          return AdminReportGeneratorView(eventId: eventId);
-        },
-      ),
-      
-      // Admin shell
-      ShellRoute(
-        builder: (context, state, child) {
-          // This would wrap admin routes with an Admin Layout (sidebar/appbar)
-          return child;
-        },
-        routes: [
-          GoRoute(
-            path: '/admin',
-            redirect: (context, state) => roleGuard(ref, ['hod', 'coordinator', 'faculty', 'admin']),
-            builder: (context, state) => const Scaffold(body: Center(child: Text('Admin Dashboard'))),
-            routes: [
-              GoRoute(
-                path: 'accreditation',
-                redirect: (context, state) => roleGuard(ref, ['hod', 'admin']),
-                builder: (context, state) => const Scaffold(body: Center(child: Text('Accreditation Compiler'))),
-              ),
-              GoRoute(
-                path: 'events',
-                redirect: (context, state) => roleGuard(ref, ['hod', 'coordinator', 'admin']),
-                builder: (context, state) => const Scaffold(body: Center(child: Text('Event Builder'))),
-              ),
-            ],
-          ),
-        ],
+        builder: (_, state) => AdminReportGeneratorView(eventId: state.extra as String?),
       ),
     ],
   );
