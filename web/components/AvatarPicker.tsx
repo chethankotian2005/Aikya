@@ -22,7 +22,7 @@ export default function AvatarPicker({
             aria-checked={selected}
             aria-label={`Avatar ${a.id}`}
             onClick={() => onChange(a.id)}
-            className="relative aspect-square rounded-full transition"
+            className="relative h-14 w-14 shrink-0 rounded-full transition"
             style={{
               background: `linear-gradient(135deg, ${a.gradient[0]}, ${a.gradient[1]})`,
               outline: selected ? "3px solid var(--color-accent)" : "3px solid transparent",
