@@ -1,17 +1,14 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:intl_phone_field/intl_phone_field.dart';
 
 import '../../../core/theme/app_tokens.dart';
 import '../../../services/firebase_service.dart';
 import '../../../services/render_api_service.dart';
 import '../../../utils/friendly_error.dart';
-import '../../../utils/image_upload.dart';
+import '../../../widgets/avatar_picker.dart';
 import '../data/user_doc.dart';
 
 class ProfileEditScreen extends ConsumerStatefulWidget {
@@ -26,7 +23,7 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
   bool _loaded = false;
 
   String? _phoneNumber;
-  String? _currentPhotoUrl;
+  int? _avatarId;
   final _bioController = TextEditingController();
   final _skillsController = TextEditingController();
   final _githubController = TextEditingController();
@@ -36,8 +33,6 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
   final _twitterController = TextEditingController();
   final _discordController = TextEditingController();
 
-  XFile? _image;
-  Uint8List? _preview;
   bool _flagForHodReview = false;
 
   PrivacySettings _privacy = const PrivacySettings();
@@ -63,7 +58,7 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
   void _load(UserDoc user) {
     if (_loaded) return;
     _loaded = true;
-    _currentPhotoUrl = user.profilePictureUrl;
+    _avatarId = user.avatarId ?? 1;
     _phoneNumber = user.phone;
     _bioController.text = user.bio ?? '';
     _skillsController.text = user.skills.join(', ');
@@ -77,25 +72,11 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
     _notifications = user.notificationSettings;
   }
 
-  Future<void> _pickImage(ImageSource source) async {
-    final picked = await ImagePicker().pickImage(source: source, imageQuality: 70, maxWidth: 1024);
-    if (picked == null) return;
-    final bytes = await picked.readAsBytes();
-    setState(() {
-      _image = picked;
-      _preview = bytes;
-    });
-  }
-
   String? _text(TextEditingController c) => c.text.trim().isEmpty ? null : c.text.trim();
 
   Future<void> _save(UserDoc user) async {
     setState(() => _saving = true);
     try {
-      final image = _image;
-      final photoUrl =
-          image == null ? _currentPhotoUrl : await uploadImage(image, 'profile_pictures/${user.uid}.jpg');
-
       await ref.read(renderApiServiceProvider).updateProfile({
         'fullName': user.fullName,
         if (user.usn.isNotEmpty) 'usn': user.usn,
@@ -108,7 +89,7 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
         'personalWebsite': _text(_websiteController),
         'twitterHandle': _text(_twitterController),
         'discordHandle': _text(_discordController),
-        'profilePictureUrl': photoUrl,
+        'avatarId': _avatarId,
         'flagForHodReview': _flagForHodReview,
         'privacySettings': _privacy.toJson(),
         'notificationSettings': _notifications.toJson(),
@@ -141,7 +122,21 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(20, 16, 20, 40),
         children: [
-          _buildPhoto(user),
+          Center(
+            child: Column(
+              children: [
+                Text('Choose your avatar', style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary)),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: 280,
+                  child: AvatarPicker(
+                    value: _avatarId,
+                    onChanged: (id) => setState(() => _avatarId = id),
+                  ),
+                ),
+              ],
+            ),
+          ),
           const SizedBox(height: 24),
           _section('Identity', Icons.school_rounded),
           _card([
@@ -227,62 +222,6 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
                   )
                 : const Icon(Icons.save_rounded),
             label: const Text('Save profile'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPhoto(UserDoc user) {
-    final ImageProvider? image = _preview != null
-        ? MemoryImage(_preview!)
-        : (_currentPhotoUrl != null && _currentPhotoUrl!.isNotEmpty ? NetworkImage(_currentPhotoUrl!) : null);
-
-    return Center(
-      child: Stack(
-        children: [
-          CircleAvatar(
-            radius: 50,
-            backgroundColor: AppColors.secondary,
-            backgroundImage: image,
-            child: image == null
-                ? Text(user.initials, style: GoogleFonts.poppins(fontSize: 32, color: Colors.white))
-                : null,
-          ),
-          Positioned(
-            right: 0,
-            bottom: 0,
-            child: IconButton.filled(
-              tooltip: 'Change photo',
-              onPressed: () => showModalBottomSheet(
-                context: context,
-                showDragHandle: true,
-                builder: (ctx) => SafeArea(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      ListTile(
-                        leading: const Icon(Icons.camera_alt_rounded),
-                        title: const Text('Take photo'),
-                        onTap: () {
-                          Navigator.pop(ctx);
-                          _pickImage(ImageSource.camera);
-                        },
-                      ),
-                      ListTile(
-                        leading: const Icon(Icons.photo_library_rounded),
-                        title: const Text('Choose from gallery'),
-                        onTap: () {
-                          Navigator.pop(ctx);
-                          _pickImage(ImageSource.gallery);
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              icon: const Icon(Icons.camera_alt_rounded, size: 18),
-            ),
           ),
         ],
       ),

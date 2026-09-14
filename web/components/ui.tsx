@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Sparkles, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
+import { avatarById } from "@/lib/avatars";
 import { initials } from "@/lib/models";
 
 export function PageHeader({ title, back, action }: { title: string; back?: boolean; action?: ReactNode }) {
@@ -80,13 +81,33 @@ export function PageSpinner() {
   );
 }
 
-export function Avatar({ name, url, size = 44 }: { name: string; url?: string | null; size?: number }) {
+export function Avatar({
+  name,
+  url,
+  avatarId,
+  size = 44,
+}: {
+  name: string;
+  url?: string | null;
+  avatarId?: number | null;
+  size?: number;
+}) {
+  const preset = avatarById(avatarId);
+  const PresetIcon = preset?.icon;
+
   return (
     <div
-      className="flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-ai-badge-gradient font-bold text-white"
-      style={{ width: size, height: size, fontSize: size * 0.36 }}
+      className={`flex shrink-0 items-center justify-center overflow-hidden rounded-full font-bold text-white ${preset ? "" : "bg-ai-badge-gradient"}`}
+      style={{
+        width: size,
+        height: size,
+        fontSize: size * 0.36,
+        ...(preset && { background: `linear-gradient(135deg, ${preset.gradient[0]}, ${preset.gradient[1]})` }),
+      }}
     >
-      {url ? (
+      {PresetIcon ? (
+        <PresetIcon size={size * 0.5} className="text-white" aria-hidden />
+      ) : url ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={url} alt={name} className="h-full w-full object-cover" />
       ) : (

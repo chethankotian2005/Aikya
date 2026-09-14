@@ -6,8 +6,8 @@ import { callBackend } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { friendlyError } from "@/lib/errors";
 import { ROLE_LABELS } from "@/lib/models";
-import { uploadImage } from "@/lib/upload";
-import { Avatar, ErrorText, PageHeader, PageSpinner } from "@/components/ui";
+import AvatarPicker from "@/components/AvatarPicker";
+import { ErrorText, PageHeader, PageSpinner } from "@/components/ui";
 
 const SOCIALS = [
   ["githubUrl", "GitHub URL"],
@@ -48,8 +48,7 @@ export default function EditProfilePage() {
   const [privacy, setPrivacy] = useState<Record<string, boolean>>({});
   const [notifications, setNotifications] = useState<Record<string, boolean>>({});
   const [flag, setFlag] = useState(false);
-  const [photo, setPhoto] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
+  const [avatarId, setAvatarId] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -61,6 +60,7 @@ export default function EditProfilePage() {
     setSocials(Object.fromEntries(SOCIALS.map(([k]) => [k, profile[k] ?? ""])) as Record<SocialKey, string>);
     setPrivacy(Object.fromEntries(PRIVACY.map(([k]) => [k, profile.privacySettings[k] !== false])));
     setNotifications(Object.fromEntries(NOTIFICATIONS.map(([k]) => [k, profile.notificationSettings[k] !== false])));
+    setAvatarId(profile.avatarId ?? 1);
     setLoaded(true);
   }, [profile, loaded]);
 
@@ -72,7 +72,6 @@ export default function EditProfilePage() {
     setError("");
     setSaving(true);
     try {
-      const profilePictureUrl = photo ? await uploadImage(photo, `profile_pictures/${user.uid}.jpg`, 5) : profile.profilePictureUrl;
       await callBackend(
         "profile",
         {
@@ -82,7 +81,7 @@ export default function EditProfilePage() {
           bio: bio.trim() || null,
           skills: skills.split(",").map((s) => s.trim()).filter(Boolean),
           ...Object.fromEntries(SOCIALS.map(([k]) => [k, socials[k].trim() || null])),
-          profilePictureUrl,
+          avatarId,
           flagForHodReview: flag,
           privacySettings: privacy,
           notificationSettings: notifications,
@@ -108,20 +107,8 @@ export default function EditProfilePage() {
       <PageHeader title="Edit Profile" back />
       <form onSubmit={save} className="flex flex-col gap-6 px-5 pt-4 pb-10">
         <div className="flex flex-col items-center gap-3">
-          <Avatar name={profile.fullName} url={preview ?? profile.profilePictureUrl} size={100} />
-          <label className="btn-outline cursor-pointer">
-            Change photo
-            <input
-              type="file"
-              accept="image/*"
-              className="sr-only"
-              onChange={(e) => {
-                const f = e.target.files?.[0] ?? null;
-                setPhoto(f);
-                setPreview(f ? URL.createObjectURL(f) : null);
-              }}
-            />
-          </label>
+          <p className="text-sm text-text-secondary">Choose your avatar</p>
+          <AvatarPicker value={avatarId} onChange={setAvatarId} />
         </div>
 
         <section className="card p-4">

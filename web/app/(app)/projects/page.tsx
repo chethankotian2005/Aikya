@@ -47,7 +47,7 @@ function Directory() {
         ) : (
           filtered.map((s) => (
             <Link key={s.uid} href={`/directory/${s.uid}`} className="card flex items-center gap-4 p-4 transition hover:border-accent/50">
-              <Avatar name={s.fullName} url={s.profilePictureUrl} size={48} />
+              <Avatar name={s.fullName} url={s.profilePictureUrl} avatarId={s.avatarId} size={48} />
               <div className="min-w-0 flex-1">
                 <h4 className="truncate text-[15px] font-bold text-text-primary">{s.fullName}</h4>
                 <p className="mt-0.5 text-xs text-text-secondary">

@@ -9,6 +9,7 @@ import '../features/auth/data/user_doc.dart';
 import '../models/project_model.dart';
 import '../services/firebase_service.dart';
 import '../utils/friendly_error.dart';
+import '../widgets/avatar_picker.dart';
 import '../widgets/banner_image.dart';
 import '../widgets/shared_widgets.dart';
 
@@ -173,15 +174,7 @@ class _MemberTile extends ConsumerWidget {
           margin: const EdgeInsets.only(bottom: 8),
           child: ListTile(
             onTap: () => context.push('/directory/profile/$uid'),
-            leading: CircleAvatar(
-              backgroundColor: AppColors.primaryContainer,
-              backgroundImage: member.profilePictureUrl != null && member.profilePictureUrl!.isNotEmpty
-                  ? NetworkImage(member.profilePictureUrl!)
-                  : null,
-              child: member.profilePictureUrl == null || member.profilePictureUrl!.isEmpty
-                  ? Text(member.initials, style: GoogleFonts.poppins(color: AppColors.secondary))
-                  : null,
-            ),
+            leading: ProfileAvatar(avatarId: member.avatarId, initials: member.initials, size: 40),
             title: Text(member.fullName, style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
             subtitle: Text(isOwner ? 'Owner' : 'Contributor'),
             trailing: const Icon(Icons.chevron_right_rounded),

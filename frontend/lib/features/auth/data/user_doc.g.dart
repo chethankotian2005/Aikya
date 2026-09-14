@@ -61,6 +61,7 @@ _UserDoc _$UserDocFromJson(Map<String, dynamic> json) => _UserDoc(
   instagramHandle: json['instagramHandle'] as String?,
   personalWebsite: json['personalWebsite'] as String?,
   profilePictureUrl: json['profilePictureUrl'] as String?,
+  avatarId: (json['avatarId'] as num?)?.toInt(),
   bio: json['bio'] as String?,
   skills:
       (json['skills'] as List<dynamic>?)?.map((e) => e as String).toList() ??
@@ -101,6 +102,7 @@ Map<String, dynamic> _$UserDocToJson(_UserDoc instance) => <String, dynamic>{
   'instagramHandle': instance.instagramHandle,
   'personalWebsite': instance.personalWebsite,
   'profilePictureUrl': instance.profilePictureUrl,
+  'avatarId': instance.avatarId,
   'bio': instance.bio,
   'skills': instance.skills,
   'githubUrl': instance.githubUrl,

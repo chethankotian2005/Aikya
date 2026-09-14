@@ -6,10 +6,10 @@ import { callBackend } from "@/lib/api";
 import { logout, useAuth } from "@/lib/auth-context";
 import { friendlyError } from "@/lib/errors";
 import { detectYear } from "@/lib/models";
-import { uploadImage } from "@/lib/upload";
-import { Avatar, ErrorText, PageSpinner } from "@/components/ui";
+import AvatarPicker from "@/components/AvatarPicker";
+import { ErrorText, PageSpinner } from "@/components/ui";
 
-const STEPS = ["Identity", "Academic info", "Socials", "Profile picture"];
+const STEPS = ["Identity", "Academic info", "Socials", "Avatar"];
 
 export default function SetupForm() {
   const { profile, user } = useAuth();
@@ -18,8 +18,7 @@ export default function SetupForm() {
   const [phone, setPhone] = useState("");
   const [flag, setFlag] = useState(false);
   const [socials, setSocials] = useState({ githubUrl: "", linkedinUrl: "", instagramHandle: "", personalWebsite: "" });
-  const [photo, setPhoto] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
+  const [avatarId, setAvatarId] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [prefilled, setPrefilled] = useState(false);
@@ -28,10 +27,9 @@ export default function SetupForm() {
     if (!profile || prefilled) return;
     setFullName(profile.fullName);
     setPhone(profile.phone ?? "");
+    setAvatarId(profile.avatarId ?? 1);
     setPrefilled(true);
   }, [profile, prefilled]);
-
-  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview); }, [preview]);
 
   if (!profile || !user) return <PageSpinner />;
 
@@ -48,7 +46,6 @@ export default function SetupForm() {
     setError("");
     setSaving(true);
     try {
-      const profilePictureUrl = photo ? await uploadImage(photo, `profile_pictures/${user.uid}.jpg`, 5) : undefined;
       const clean = (v: string) => v.trim() || null;
       await callBackend(
         "profile",
@@ -60,7 +57,7 @@ export default function SetupForm() {
           linkedinUrl: clean(socials.linkedinUrl),
           instagramHandle: clean(socials.instagramHandle),
           personalWebsite: clean(socials.personalWebsite),
-          ...(profilePictureUrl ? { profilePictureUrl } : {}),
+          avatarId,
           flagForHodReview: flag,
         },
         "PUT",
@@ -146,21 +143,8 @@ export default function SetupForm() {
 
         {step === 3 && (
           <div className="flex flex-col items-center gap-4">
-            <Avatar name={fullName} url={preview} size={112} />
-            <label className="btn-outline cursor-pointer">
-              Choose a photo
-              <input
-                type="file"
-                accept="image/*"
-                className="sr-only"
-                onChange={(e) => {
-                  const file = e.target.files?.[0] ?? null;
-                  setPhoto(file);
-                  setPreview(file ? URL.createObjectURL(file) : null);
-                }}
-              />
-            </label>
-            <p className="text-xs text-text-tertiary">Optional · JPG or PNG under 5 MB</p>
+            <p className="text-sm text-text-secondary">Pick an avatar to represent you.</p>
+            <AvatarPicker value={avatarId} onChange={setAvatarId} />
           </div>
         )}
 

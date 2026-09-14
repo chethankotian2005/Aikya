@@ -41,7 +41,7 @@ export default function PublicProfile({ uid }: { uid: string }) {
     <div className="flex flex-col">
       <PageHeader title={u.fullName} back />
       <div className="flex flex-col items-center gap-3 px-5 pt-6 text-center">
-        <Avatar name={u.fullName} url={u.profilePictureUrl} size={100} />
+        <Avatar name={u.fullName} url={u.profilePictureUrl} avatarId={u.avatarId} size={100} />
         <h2 className="text-xl font-bold text-text-primary">{u.fullName}</h2>
         <p className="text-sm text-text-secondary">{subtitle}</p>
         {u.skills.length > 0 && (

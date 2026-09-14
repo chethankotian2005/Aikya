@@ -14,6 +14,10 @@ import { verifyAuth } from '../middleware/verifyAuth.js';
 
 const router = express.Router();
 
+// Must match the 12 entries in each client's avatar catalog (lib/avatars.ts /
+// widgets/avatar_picker.dart) — presets only, no file storage (spec §9).
+const AVATAR_COUNT = 12;
+
 const OPTIONAL_STRING_FIELDS = [
   'phone',
   'bio',
@@ -35,16 +39,25 @@ function optionalString(value) {
 
 router.put('/profile', verifyAuth, async (req, res) => {
   try {
-    const { fullName, usn, skills, flagForHodReview, privacySettings, notificationSettings } = req.body;
+    const { fullName, usn, skills, avatarId, flagForHodReview, privacySettings, notificationSettings } = req.body;
 
     if (typeof fullName !== 'string' || !fullName.trim()) {
       return res.status(400).json({ error: 'Full name is required.' });
+    }
+    if (avatarId !== undefined && avatarId !== null) {
+      if (!Number.isInteger(avatarId) || avatarId < 1 || avatarId > AVATAR_COUNT) {
+        return res.status(400).json({ error: 'Invalid avatar selection.' });
+      }
     }
 
     const updateData = {
       fullName: fullName.trim().slice(0, 100),
       profileComplete: true,
     };
+
+    if (avatarId !== undefined) {
+      updateData.avatarId = avatarId;
+    }
 
     for (const field of OPTIONAL_STRING_FIELDS) {
       const value = optionalString(req.body[field]);

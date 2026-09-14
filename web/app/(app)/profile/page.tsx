@@ -114,7 +114,7 @@ export default function ProfilePage() {
 
       <div className="px-5 py-3">
         <div className="card flex items-center gap-5 p-5">
-          <Avatar name={profile.fullName} url={profile.profilePictureUrl} size={72} />
+          <Avatar name={profile.fullName} url={profile.profilePictureUrl} avatarId={profile.avatarId} size={72} />
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-[20px] font-extrabold text-text-primary">{profile.fullName}</h2>
             <div className="mt-1"><TagChip label={ROLE_LABELS[profile.role]} /></div>

@@ -14,6 +14,7 @@ import '../models/firestore/memory_frame_doc.dart';
 import '../models/project_model.dart';
 import '../services/firebase_service.dart';
 import '../utils/friendly_error.dart';
+import '../widgets/avatar_picker.dart';
 import '../widgets/shared_widgets.dart';
 import 'events_hub_screen.dart' show formatEventDate;
 
@@ -143,7 +144,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }
 
   Widget _buildHeader(UserDoc user) {
-    final photo = user.profilePictureUrl;
     final details = user.role == UserRole.student
         ? ['USN ${user.usn}', '${user.yearOfStudy ?? '-'} Year', if (user.batch != null) user.batch!]
         : [user.designation ?? user.role.label, if (user.club != null) user.club!, if (user.facultyId != null) 'ID ${user.facultyId}'];
@@ -155,25 +155,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           padding: const EdgeInsets.all(20),
           child: Row(
             children: [
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: AppColors.aiBadgeGradient,
-                  image: photo != null && photo.isNotEmpty
-                      ? DecorationImage(image: NetworkImage(photo), fit: BoxFit.cover)
-                      : null,
-                ),
-                child: photo == null || photo.isEmpty
-                    ? Center(
-                        child: Text(
-                          user.initials,
-                          style: GoogleFonts.poppins(fontSize: 26, fontWeight: FontWeight.w700, color: Colors.white),
-                        ),
-                      )
-                    : null,
-              ),
+              ProfileAvatar(avatarId: user.avatarId, initials: user.initials, size: 72),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(

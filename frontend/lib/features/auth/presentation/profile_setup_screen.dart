@@ -1,17 +1,14 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:intl_phone_field/intl_phone_field.dart';
 
 import '../../../core/theme/app_tokens.dart';
 import '../../../services/firebase_service.dart';
 import '../../../services/render_api_service.dart';
 import '../../../utils/friendly_error.dart';
-import '../../../utils/image_upload.dart';
 import '../../../utils/usn_parser.dart';
+import '../../../widgets/avatar_picker.dart';
 import '../data/user_doc.dart';
 import 'auth_controller.dart';
 
@@ -40,8 +37,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
   final _instagramController = TextEditingController();
   final _websiteController = TextEditingController();
 
-  XFile? _image;
-  Uint8List? _preview;
+  int? _avatarId;
 
   @override
   void dispose() {
@@ -64,16 +60,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
     _linkedinController.text = user.linkedinUrl ?? '';
     _instagramController.text = user.instagramHandle ?? '';
     _websiteController.text = user.personalWebsite ?? '';
-  }
-
-  Future<void> _pickImage(ImageSource source) async {
-    final picked = await ImagePicker().pickImage(source: source, imageQuality: 70, maxWidth: 1024);
-    if (picked == null) return;
-    final bytes = await picked.readAsBytes();
-    setState(() {
-      _image = picked;
-      _preview = bytes;
-    });
+    _avatarId = user.avatarId ?? 1;
   }
 
   String? _nullIfEmpty(TextEditingController c) => c.text.trim().isEmpty ? null : c.text.trim();
@@ -84,9 +71,6 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
 
     setState(() => _saving = true);
     try {
-      final image = _image;
-      final photoUrl = image == null ? null : await uploadImage(image, 'profile_pictures/${user.uid}.jpg');
-
       await ref.read(renderApiServiceProvider).updateProfile({
         'fullName': _nameController.text.trim(),
         'usn': _usnController.text.trim().toUpperCase(),
@@ -95,7 +79,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
         'linkedinUrl': _nullIfEmpty(_linkedinController),
         'instagramHandle': _nullIfEmpty(_instagramController),
         'personalWebsite': _nullIfEmpty(_websiteController),
-        'profilePictureUrl': ?photoUrl,
+        'avatarId': _avatarId,
         'flagForHodReview': _flagForHodReview,
       });
 
@@ -276,40 +260,20 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
                   ),
                 ),
                 Step(
-                  title: const Text('Profile Picture'),
+                  title: const Text('Avatar'),
                   isActive: _step >= 3,
-                  content: Center(
-                    child: Column(
-                      children: [
-                        CircleAvatar(
-                          radius: 60,
-                          backgroundColor: AppColors.secondary,
-                          backgroundImage: _preview != null ? MemoryImage(_preview!) : null,
-                          child: _preview == null
-                              ? Text(
-                                  _nameController.text.isNotEmpty ? _nameController.text[0].toUpperCase() : '?',
-                                  style: const TextStyle(fontSize: 40, color: Colors.white),
-                                )
-                              : null,
-                        ),
-                        const SizedBox(height: 16),
-                        Wrap(
-                          spacing: 12,
-                          children: [
-                            OutlinedButton.icon(
-                              icon: const Icon(Icons.camera_alt_outlined),
-                              label: const Text('Camera'),
-                              onPressed: () => _pickImage(ImageSource.camera),
-                            ),
-                            OutlinedButton.icon(
-                              icon: const Icon(Icons.photo_library_outlined),
-                              label: const Text('Gallery'),
-                              onPressed: () => _pickImage(ImageSource.gallery),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
+                  content: Column(
+                    children: [
+                      const Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text('Pick an avatar to represent you.'),
+                      ),
+                      const SizedBox(height: 16),
+                      AvatarPicker(
+                        value: _avatarId,
+                        onChanged: (id) => setState(() => _avatarId = id),
+                      ),
+                    ],
                   ),
                 ),
               ],

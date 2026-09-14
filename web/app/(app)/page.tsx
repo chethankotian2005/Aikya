@@ -69,7 +69,7 @@ export default function Home() {
     <div className="flex flex-col">
       <header className="flex items-center gap-4 px-5 pt-5 pb-2">
         <Link href="/profile" aria-label="Open my dashboard">
-          <Avatar name={profile.fullName} url={profile.profilePictureUrl} />
+          <Avatar name={profile.fullName} url={profile.profilePictureUrl} avatarId={profile.avatarId} />
         </Link>
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium text-text-tertiary">{greeting}</p>

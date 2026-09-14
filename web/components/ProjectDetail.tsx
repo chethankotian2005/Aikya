@@ -111,7 +111,7 @@ export default function ProjectDetail({ id }: { id: string }) {
           <div className="flex flex-col gap-2">
             {members.map((m) => (
               <Link key={m.uid} href={`/directory/${m.uid}`} className="card flex items-center gap-3 p-3 transition hover:border-accent/50">
-                <Avatar name={m.fullName} url={m.profilePictureUrl} size={40} />
+                <Avatar name={m.fullName} url={m.profilePictureUrl} avatarId={m.avatarId} size={40} />
                 <div className="flex-1">
                   <p className="text-sm font-semibold text-text-primary">{m.fullName}</p>
                   <p className="text-xs text-text-tertiary">{m.uid === p.ownerUid ? "Owner" : "Contributor"}</p>

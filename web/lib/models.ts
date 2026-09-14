@@ -56,6 +56,7 @@ export interface UserProfile {
   twitterHandle: string | null;
   discordHandle: string | null;
   profilePictureUrl: string | null;
+  avatarId: number | null;
   yearOfStudy: string | null;
   batch: string | null;
   status: string | null;
@@ -85,6 +86,7 @@ export function toProfile(uid: string, d: Record<string, unknown>): UserProfile 
     twitterHandle: optStr(d.twitterHandle),
     discordHandle: optStr(d.discordHandle),
     profilePictureUrl: optStr(d.profilePictureUrl),
+    avatarId: typeof d.avatarId === "number" ? d.avatarId : null,
     yearOfStudy: d.yearOfStudy == null ? null : String(d.yearOfStudy),
     batch: optStr(d.batch),
     status: optStr(d.status),

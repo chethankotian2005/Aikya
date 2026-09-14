@@ -66,6 +66,7 @@ abstract class UserDoc with _$UserDoc {
     String? instagramHandle,
     String? personalWebsite,
     String? profilePictureUrl,
+    int? avatarId,
     String? bio,
     @Default([]) List<String> skills,
     String? githubUrl,

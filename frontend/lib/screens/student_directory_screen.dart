@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../core/theme/app_tokens.dart';
 import '../services/firebase_service.dart';
 import '../features/auth/data/user_doc.dart';
+import '../widgets/avatar_picker.dart';
 
 class StudentDirectoryScreen extends ConsumerStatefulWidget {
   const StudentDirectoryScreen({super.key});
@@ -134,29 +135,7 @@ class _StudentDirectoryScreenState extends ConsumerState<StudentDirectoryScreen>
         ),
         child: Row(
           children: [
-            Container(
-              width: 50,
-              height: 50,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: AppColors.aiBadgeGradient,
-                image: user.profilePictureUrl != null && user.profilePictureUrl!.isNotEmpty
-                    ? DecorationImage(image: NetworkImage(user.profilePictureUrl!), fit: BoxFit.cover)
-                    : null,
-              ),
-              child: user.profilePictureUrl == null || user.profilePictureUrl!.isEmpty
-                  ? Center(
-                      child: Text(
-                        initials,
-                        style: GoogleFonts.poppins(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
-                        ),
-                      ),
-                    )
-                  : null,
-            ),
+            ProfileAvatar(avatarId: user.avatarId, initials: initials, size: 50),
             const SizedBox(width: 16),
             Expanded(
               child: Column(

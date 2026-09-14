@@ -8,6 +8,7 @@ import '../core/theme/app_tokens.dart';
 import '../features/auth/data/user_doc.dart';
 import '../models/project_model.dart';
 import '../services/firebase_service.dart';
+import '../widgets/avatar_picker.dart';
 import '../widgets/project_tile.dart';
 import '../widgets/shared_widgets.dart';
 
@@ -74,32 +75,13 @@ class PublicProfileScreen extends ConsumerWidget {
   }
 
   Widget _buildHeader(UserDoc user) {
-    final photo = user.profilePictureUrl;
     final subtitle = user.role == UserRole.student
         ? '${user.yearOfStudy ?? '-'} Year · ${user.batch ?? 'AI & ML'}'
         : [user.designation ?? user.role.label, if (user.club != null) user.club].join(' · ');
 
     return Column(
       children: [
-        Container(
-          width: 100,
-          height: 100,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: AppColors.aiBadgeGradient,
-            image: photo != null && photo.isNotEmpty
-                ? DecorationImage(image: NetworkImage(photo), fit: BoxFit.cover)
-                : null,
-          ),
-          child: photo == null || photo.isEmpty
-              ? Center(
-                  child: Text(
-                    user.initials,
-                    style: GoogleFonts.poppins(fontSize: 32, fontWeight: FontWeight.w700, color: Colors.white),
-                  ),
-                )
-              : null,
-        ),
+        ProfileAvatar(avatarId: user.avatarId, initials: user.initials, size: 100),
         const SizedBox(height: 16),
         Text(user.fullName, style: GoogleFonts.poppins(fontSize: 22, fontWeight: FontWeight.w700)),
         const SizedBox(height: 4),

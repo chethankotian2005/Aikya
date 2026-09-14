@@ -11,6 +11,7 @@ import '../providers/updates_provider.dart';
 import '../services/firebase_service.dart';
 import '../services/messaging_service.dart';
 import '../utils/friendly_error.dart';
+import '../widgets/avatar_picker.dart';
 import '../widgets/banner_image.dart';
 import '../widgets/shared_widgets.dart';
 import '../widgets/update_card.dart';
@@ -119,7 +120,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   // ─── Header ─────────────────────────────────────────────────────────
   Widget _buildHeader(UserDoc? user) {
-    final photo = user?.profilePictureUrl;
     final subtitle = user == null
         ? ''
         : user.role == UserRole.student
@@ -132,29 +132,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         children: [
           GestureDetector(
             onTap: () => context.push('/profile'),
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: AppColors.aiBadgeGradient,
-                image: photo != null && photo.isNotEmpty
-                    ? DecorationImage(image: NetworkImage(photo), fit: BoxFit.cover)
-                    : null,
-              ),
-              child: photo == null || photo.isEmpty
-                  ? Center(
-                      child: Text(
-                        user?.initials ?? '',
-                        style: GoogleFonts.poppins(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
-                        ),
-                      ),
-                    )
-                  : null,
-            ),
+            child: ProfileAvatar(avatarId: user?.avatarId, initials: user?.initials ?? '', size: 44),
           ),
           const SizedBox(width: AppSpacing.md),
           Expanded(
