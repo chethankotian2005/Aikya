@@ -17,6 +17,7 @@ export default function AdminEventsPage() {
   const events = useManageableEvents(profile);
   const isHod = profile?.role === "hod";
   const [busy, setBusy] = useState<string | null>(null);
+  const [sheetBusy, setSheetBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   const remove = async (id: string, title: string) => {
@@ -25,6 +26,19 @@ export default function AdminEventsPage() {
       await deleteDoc(doc(db, "events", id));
     } catch (err) {
       alert(friendlyError(err));
+    }
+  };
+
+  const downloadSheet = async (id: string) => {
+    setSheetBusy(id);
+    setError("");
+    try {
+      const result = await callBackend<{ pdfUrl: string }>("attendance/sheet", { eventId: id });
+      window.open(result.pdfUrl, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      setError(friendlyError(err));
+    } finally {
+      setSheetBusy(null);
     }
   };
 
@@ -88,6 +102,17 @@ export default function AdminEventsPage() {
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Link href={`/admin/events/${e.id}/edit`} className="btn-outline px-4 py-2">Edit</Link>
+                    {!pending && !rejected && (
+                      <Link href={`/admin/events/${e.id}/scan`} className="btn-outline px-4 py-2">Scan attendance</Link>
+                    )}
+                    <button
+                      type="button"
+                      disabled={sheetBusy === e.id}
+                      onClick={() => downloadSheet(e.id)}
+                      className="btn-outline px-4 py-2"
+                    >
+                      {sheetBusy === e.id ? "Generating…" : "Attendance sheet"}
+                    </button>
                     <Link href={`/admin/reports?eventId=${e.id}`} className="btn-outline px-4 py-2">Report</Link>
                     <button type="button" onClick={() => remove(e.id, e.title)} className="btn-outline px-4 py-2 text-error">
                       Delete

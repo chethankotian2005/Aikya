@@ -42,6 +42,7 @@ export default function EventBuilder({ id }: { id?: string }) {
   const [capacity, setCapacity] = useState("50");
   const [fields, setFields] = useState<RegistrationField[]>(DEFAULT_FIELDS);
   const [targetYears, setTargetYears] = useState<string[]>([]);
+  const [fullDayEvent, setFullDayEvent] = useState(false);
   const [banner, setBanner] = useState<File | null>(null);
   const [bannerUrl, setBannerUrl] = useState<string | null>(null);
   const [registered, setRegistered] = useState(0);
@@ -65,6 +66,7 @@ export default function EventBuilder({ id }: { id?: string }) {
         setCapacity(String(e.maxCapacity));
         setFields(e.formFields);
         setTargetYears(e.targetYears);
+        setFullDayEvent(e.sessions.length > 1);
         setBannerUrl(e.bannerUrl);
         setRegistered(e.currentRegistrations);
       })
@@ -115,6 +117,7 @@ export default function EventBuilder({ id }: { id?: string }) {
           customFormSchema: { fields },
           bannerUrl: url,
           targetYears,
+          sessions: fullDayEvent ? ["morning", "afternoon"] : ["full"],
         });
         router.push(`/events/${id}`);
       } else {
@@ -134,6 +137,7 @@ export default function EventBuilder({ id }: { id?: string }) {
           formFields: fields,
           bannerUrl: url,
           targetYears,
+          fullDayEvent,
         });
         router.push(result.status === "pending" ? "/admin/events" : `/events/${result.id}`);
       }
@@ -224,6 +228,22 @@ export default function EventBuilder({ id }: { id?: string }) {
             );
           })}
         </div>
+      </section>
+
+      <section className="card flex flex-col gap-3 p-4">
+        <h3 className="font-bold text-text-primary">Attendance</h3>
+        <label className="flex items-center gap-3 text-sm">
+          <input
+            type="checkbox"
+            className="h-4 w-4 accent-secondary"
+            checked={fullDayEvent}
+            onChange={(e) => setFullDayEvent(e.target.checked)}
+          />
+          <span>
+            Full-day event
+            <span className="block text-xs text-text-secondary">Generates separate morning and afternoon QR attendance sessions.</span>
+          </span>
+        </label>
       </section>
 
       <section className="card flex flex-col gap-3 p-4">

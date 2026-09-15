@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Timestamp, collection, getCountFromServer, query, where, type Query } from "firebase/firestore";
-import { CalendarCheck, CalendarDays, FileQuestion, Flag, FolderOpen, ShieldAlert, ClipboardCheck, Users, type LucideIcon } from "lucide-react";
+import { CalendarCheck, CalendarDays, Flag, FolderOpen, ShieldAlert, ClipboardCheck, Users, type LucideIcon } from "lucide-react";
 import { db } from "@/lib/firebase/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { friendlyError } from "@/lib/errors";
@@ -24,10 +24,9 @@ export default function AdminDashboard() {
 
     const load = async (): Promise<Stat[]> => {
       if (profile.role === "hod") {
-        const [upcoming, eventApprovals, attendance, moderation, students, reviews, projects] = await Promise.all([
+        const [upcoming, eventApprovals, moderation, students, reviews, projects] = await Promise.all([
           countOf(query(events, where("status", "==", "approved"), where("eventDate", ">=", now))),
           countOf(query(events, where("status", "==", "pending"))),
-          countOf(query(collection(db, "attendanceRequests"), where("status", "==", "pending"))),
           countOf(query(collection(db, "memoryFrames"), where("status", "==", "pending"))),
           countOf(query(collection(db, "users"), where("role", "==", "student"))),
           countOf(query(collection(db, "users"), where("status", "==", "pending_batch_review"))),
@@ -36,7 +35,6 @@ export default function AdminDashboard() {
         return [
           { label: "Upcoming events", value: upcoming, icon: CalendarCheck, tone: "text-accent bg-accent/15" },
           { label: "Event approvals", value: eventApprovals, icon: ClipboardCheck, tone: "text-error bg-error/15" },
-          { label: "Pending attendance", value: attendance, icon: FileQuestion, tone: "text-warning bg-warning/15" },
           { label: "Moderation queue", value: moderation, icon: ShieldAlert, tone: "text-error bg-error/15" },
           { label: "Students", value: students, icon: Users, tone: "text-success bg-success/15" },
           { label: "Batch reviews", value: reviews, icon: Flag, tone: "text-warning bg-warning/15" },

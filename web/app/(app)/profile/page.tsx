@@ -3,18 +3,19 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  addDoc, collection, collectionGroup, doc, getDoc, getDocs, orderBy, query, serverTimestamp, where,
+  collection, collectionGroup, doc, getDoc, getDocs, orderBy, query, where,
 } from "firebase/firestore";
-import { CalendarCheck, Edit, LogOut, Megaphone, ShieldCheck, Ticket, UploadCloud } from "lucide-react";
+import { CalendarCheck, Edit, LogOut, Megaphone, QrCode, ShieldCheck, Ticket, UploadCloud } from "lucide-react";
 import { db } from "@/lib/firebase/firebase";
 import { logout, useAuth } from "@/lib/auth-context";
 import { friendlyError } from "@/lib/errors";
 import { useLiveQuery } from "@/lib/hooks";
 import {
-  ROLE_LABELS, canBuildEvents, eventIsPast, formatDateTime, isStaff, toAttendance, toEvent, toFrame, toProject,
+  ROLE_LABELS, canBuildEvents, eventIsPast, formatDateTime, isStaff, toAttendanceRecord, toEvent, toFrame, toProject,
   type EventItem,
 } from "@/lib/models";
-import { Avatar, EmptyState, ErrorText, PageHeader, PageSpinner, TagChip } from "@/components/ui";
+import { Avatar, EmptyState, PageHeader, PageSpinner, TagChip } from "@/components/ui";
+import MyQrCode from "@/components/MyQrCode";
 
 type Tab = "tickets" | "uploads" | "attendance";
 
@@ -59,15 +60,10 @@ export default function ProfilePage() {
     [profile?.uid, isStudent],
   );
   const attendance = useLiveQuery(
-    () => (profile && isStudent ? query(collection(db, "attendanceRequests"), where("studentId", "==", profile.uid)) : null),
-    toAttendance,
+    () => (profile && isStudent ? query(collectionGroup(db, "attendance"), where("studentUid", "==", profile.uid)) : null),
+    toAttendanceRecord,
     [profile?.uid, isStudent],
   );
-
-  const [requestEvent, setRequestEvent] = useState("");
-  const [requestDetails, setRequestDetails] = useState("");
-  const [requestError, setRequestError] = useState("");
-  const [requestSent, setRequestSent] = useState(false);
 
   if (!profile) return <PageSpinner />;
 
@@ -76,37 +72,16 @@ export default function ProfilePage() {
       ? [`USN ${profile.usn}`, profile.yearOfStudy && `${profile.yearOfStudy} Year`, profile.batch]
       : [profile.designation ?? ROLE_LABELS[profile.role], profile.club, profile.facultyId && `ID ${profile.facultyId}`];
 
-  const submitRequest = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setRequestError("");
-    setRequestSent(false);
-    if (!requestEvent) return setRequestError("Choose the event this request is for.");
-    if (requestDetails.trim().length < 10) return setRequestError("Please add a little more detail.");
-    try {
-      await addDoc(collection(db, "attendanceRequests"), {
-        studentId: profile.uid,
-        eventId: requestEvent,
-        requestDetails: requestDetails.trim(),
-        status: "pending",
-        createdAt: serverTimestamp(),
-      });
-      setRequestDetails("");
-      setRequestSent(true);
-    } catch (err) {
-      setRequestError(friendlyError(err));
-    }
-  };
-
   const tabs: { id: Tab; label: string; icon: typeof Ticket }[] = isStudent
     ? [
         { id: "tickets", label: "My Tickets", icon: Ticket },
         { id: "uploads", label: "My Uploads", icon: UploadCloud },
-        { id: "attendance", label: "Attendance", icon: CalendarCheck },
+        { id: "attendance", label: "Attendance", icon: QrCode },
       ]
     : [{ id: "uploads", label: "My Uploads", icon: UploadCloud }];
 
   const eventTitle = (id: string) => tickets.events?.find((t) => t.id === id)?.title ?? "Event";
-  const sortedAttendance = [...attendance.data].sort((a, b) => (b.createdAt?.getTime() ?? 0) - (a.createdAt?.getTime() ?? 0));
+  const sortedAttendance = [...attendance.data].sort((a, b) => (b.scannedAt?.getTime() ?? 0) - (a.scannedAt?.getTime() ?? 0));
 
   return (
     <div className="flex flex-col">
@@ -209,31 +184,28 @@ export default function ProfilePage() {
 
         {activeTab === "attendance" && (
           <>
-            <form onSubmit={submitRequest} className="card flex flex-col gap-3 p-4">
-              <h3 className="font-bold text-text-primary">New attendance / OD request</h3>
-              <select aria-label="Event" className="input" value={requestEvent} onChange={(e) => setRequestEvent(e.target.value)}>
-                <option value="">Choose one of your events</option>
-                {(tickets.events ?? []).map((e) => (
-                  <option key={e.id} value={e.id}>{e.title}</option>
-                ))}
-              </select>
-              <textarea aria-label="Details" className="input" rows={3} maxLength={500} placeholder="Which classes did you miss and why?" value={requestDetails} onChange={(e) => setRequestDetails(e.target.value)} />
-              <ErrorText message={requestError} />
-              {requestSent && <p role="status" className="text-sm font-semibold text-success">Request sent to the HOD for review.</p>}
-              <button type="submit" className="btn-primary self-start">Submit request</button>
-            </form>
+            <div className="card flex flex-col items-center gap-3 p-5">
+              <MyQrCode uid={profile.uid} />
+              <p className="text-center text-xs text-text-secondary">
+                Show this at an event &mdash; a coordinator or faculty scans it to mark you present.
+              </p>
+            </div>
+            <h3 className="mt-2 font-bold text-text-primary">My Attendance</h3>
             {sortedAttendance.length === 0 ? (
-              <EmptyState icon={CalendarCheck} message={attendance.error || "No attendance requests yet."} />
+              <EmptyState icon={CalendarCheck} message={attendance.error || "No check-ins yet."} />
             ) : (
               sortedAttendance.map((r) => (
-                <div key={r.id} className="card p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <h3 className="font-bold text-text-primary">{eventTitle(r.eventId)}</h3>
-                    <TagChip label={r.status} tone={r.status === "approved" ? "success" : r.status === "rejected" ? "error" : "warning"} />
+                <Link key={r.id} href={`/events/${r.eventId}`} className="card flex items-center justify-between gap-3 p-4 transition hover:border-accent/50">
+                  <div className="min-w-0">
+                    <h3 className="truncate font-bold text-text-primary">{eventTitle(r.eventId)}</h3>
+                    <p className="text-xs text-text-secondary">
+                      {[r.session !== "full" ? (r.session === "morning" ? "Morning session" : "Afternoon session") : null, r.scannedAt ? formatDateTime(r.scannedAt) : null]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </p>
                   </div>
-                  <p className="mt-2 text-[13px] text-text-secondary">{r.requestDetails}</p>
-                  {r.reviewNotes && <p className="mt-2 text-xs text-text-tertiary italic">HOD note: {r.reviewNotes}</p>}
-                </div>
+                  <TagChip label="Present" tone="success" />
+                </Link>
               ))
             )}
           </>

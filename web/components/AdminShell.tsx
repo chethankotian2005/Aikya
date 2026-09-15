@@ -5,7 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  BarChart3, Calendar, CheckSquare, FileText, Home, LayoutDashboard, LogOut, Menu,
+  BarChart3, Calendar, FileText, Home, LayoutDashboard, LogOut, Menu,
   Settings, ShieldAlert, ShieldCheck, UserPlus, X,
 } from "lucide-react";
 import { logout } from "@/lib/auth-context";
@@ -19,7 +19,6 @@ const NAV_ITEMS = [
   { name: "Analytics", href: "/admin/analytics", icon: BarChart3, hodOnly: false },
   { name: "Accreditation", href: "/admin/accreditation", icon: ShieldCheck, hodOnly: true },
   { name: "Moderation", href: "/admin/moderation", icon: ShieldAlert, hodOnly: true },
-  { name: "Attendance", href: "/admin/attendance", icon: CheckSquare, hodOnly: true },
   { name: "Batch Config", href: "/admin/config", icon: Settings, hodOnly: true },
   { name: "Staff", href: "/admin/staff", icon: UserPlus, hodOnly: true },
 ];

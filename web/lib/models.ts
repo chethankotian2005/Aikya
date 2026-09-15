@@ -144,6 +144,8 @@ export interface EventItem {
   reviewNotes: string | null;
   /** Years of study this event is restricted to (e.g. ["3","4"]). Empty = open to everyone. */
   targetYears: string[];
+  /** Attendance-tracking sessions: ["full"] normally, or ["morning","afternoon"] for a full-day event. */
+  sessions: string[];
 }
 
 export function eventOpenToYear(event: EventItem, studentYear: string | null): boolean {
@@ -176,6 +178,7 @@ export function toEvent(id: string, d: Record<string, unknown>): EventItem {
     status: optStr(d.status),
     reviewNotes: optStr(d.reviewNotes),
     targetYears: strList(d.targetYears),
+    sessions: strList(d.sessions).length > 0 ? strList(d.sessions) : ["full"],
   };
 }
 
@@ -246,26 +249,26 @@ export function toFrame(id: string, d: Record<string, unknown>): MemoryFrame {
   };
 }
 
-export interface AttendanceRequest {
+/** A QR check-in record — events/{eventId}/attendance/{studentUid}_{session}. */
+export interface AttendanceRecord {
   id: string;
-  studentId: string;
   eventId: string;
-  requestDetails: string;
-  status: FrameStatus;
-  reviewNotes: string | null;
-  createdAt: Date | null;
+  studentUid: string;
+  studentName: string;
+  usn: string | null;
+  session: string;
+  scannedAt: Date | null;
 }
 
-export function toAttendance(id: string, d: Record<string, unknown>): AttendanceRequest {
-  const status = d.status === "approved" || d.status === "rejected" ? d.status : "pending";
+export function toAttendanceRecord(id: string, d: Record<string, unknown>): AttendanceRecord {
   return {
     id,
-    studentId: str(d.studentId),
     eventId: str(d.eventId),
-    requestDetails: str(d.requestDetails),
-    status,
-    reviewNotes: optStr(d.reviewNotes),
-    createdAt: toDate(d.createdAt),
+    studentUid: str(d.studentUid),
+    studentName: str(d.studentName),
+    usn: optStr(d.usn),
+    session: str(d.session) || "full",
+    scannedAt: toDate(d.scannedAt),
   };
 }
 
