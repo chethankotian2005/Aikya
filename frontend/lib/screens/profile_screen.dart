@@ -5,16 +5,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:timeago/timeago.dart' as timeago;
+
 import '../core/theme/app_tokens.dart';
 import '../features/auth/data/user_doc.dart';
 import '../features/auth/presentation/auth_controller.dart';
-import '../models/firestore/attendance_request.dart';
 import '../models/firestore/event_doc.dart';
 import '../models/firestore/memory_frame_doc.dart';
 import '../models/project_model.dart';
 import '../services/firebase_service.dart';
 import '../utils/friendly_error.dart';
 import '../widgets/avatar_picker.dart';
+import '../widgets/my_qr_code.dart';
 import '../widgets/shared_widgets.dart';
 import 'events_hub_screen.dart' show formatEventDate;
 
@@ -54,13 +56,20 @@ final myProjectsProvider = StreamProvider.autoDispose<List<ProjectDoc>>((ref) {
       .map((snap) => snap.docs.map(ProjectDoc.fromFirestore).toList());
 });
 
-final myAttendanceProvider = StreamProvider.autoDispose<List<AttendanceRequestDoc>>((ref) {
+/// Attendance records are written only through POST /api/attendance/scan
+/// (see AttendanceScannerScreen) — this just reads what's already there.
+final myAttendanceProvider = StreamProvider.autoDispose<List<QueryDocumentSnapshot<Map<String, dynamic>>>>((ref) {
   if (_uid == null) return Stream.value(const []);
-  return AttendanceRequestDoc.collection
-      .where('studentId', isEqualTo: _uid)
+  return FirebaseFirestore.instance
+      .collectionGroup('attendance')
+      .where('studentUid', isEqualTo: _uid)
       .snapshots()
-      .map((snap) => snap.docs.map(AttendanceRequestDoc.fromFirestore).toList()
-        ..sort((a, b) => (b.createdAt ?? DateTime.now()).compareTo(a.createdAt ?? DateTime.now())));
+      .map((snap) => snap.docs.toList()
+        ..sort((a, b) {
+          final at = a.data()['scannedAt'] as Timestamp?;
+          final bt = b.data()['scannedAt'] as Timestamp?;
+          return (bt ?? Timestamp.now()).compareTo(at ?? Timestamp.now());
+        }));
 });
 
 /// "My Dashboard": profile header plus tickets, uploads and attendance (spec §6).
@@ -373,165 +382,76 @@ class _AttendanceTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final requests = ref.watch(myAttendanceProvider);
+    final records = ref.watch(myAttendanceProvider);
+    final uid = _uid;
 
-    return Column(
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-          child: SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: () => _showNewRequestDialog(context, ref),
-              icon: const Icon(Icons.add_rounded),
-              label: const Text('New attendance / OD request'),
-            ),
+        Center(
+          child: Column(
+            children: [
+              if (uid != null) MyQrCode(uid: uid),
+              const SizedBox(height: 12),
+              Text(
+                'Show this at an event — a coordinator or faculty scans it to mark you present.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary),
+              ),
+            ],
           ),
         ),
-        Expanded(
-          child: _asyncList(
-            requests,
-            emptyIcon: Icons.fact_check_outlined,
-            emptyMessage: 'No attendance requests yet.',
-            builder: (list) => ListView.separated(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
-              itemCount: list.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 12),
-              itemBuilder: (_, i) => _AttendanceCard(request: list[i]),
-            ),
-          ),
+        const SizedBox(height: 28),
+        Text('My Attendance', style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 12),
+        records.when(
+          loading: () => const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator())),
+          error: (e, _) => Text(friendlyError(e), style: const TextStyle(color: AppColors.error)),
+          data: (list) => list.isEmpty
+              ? Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  child: Center(
+                    child: Text('No check-ins yet.', style: GoogleFonts.poppins(color: AppColors.textTertiary)),
+                  ),
+                )
+              : Column(children: [for (final doc in list) _AttendanceCard(doc: doc)]),
         ),
       ],
     );
   }
-
-  Future<void> _showNewRequestDialog(BuildContext context, WidgetRef ref) async {
-    final events = ref.read(myTicketsProvider).valueOrNull ?? const [];
-    if (events.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Register for an event first — requests are tied to an event.')),
-      );
-      return;
-    }
-
-    String eventId = events.first.id;
-    final detailsController = TextEditingController();
-    final formKey = GlobalKey<FormState>();
-
-    final submitted = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Attendance request'),
-        content: Form(
-          key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              DropdownButtonFormField<String>(
-                initialValue: eventId,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Event'),
-                items: [
-                  for (final e in events)
-                    DropdownMenuItem(value: e.id, child: Text(e.title, overflow: TextOverflow.ellipsis)),
-                ],
-                onChanged: (v) => eventId = v ?? eventId,
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: detailsController,
-                minLines: 3,
-                maxLines: 5,
-                maxLength: 500,
-                decoration: const InputDecoration(
-                  labelText: 'Details',
-                  hintText: 'Which classes did you miss and why?',
-                ),
-                validator: (v) => (v ?? '').trim().length < 10 ? 'Please add a little more detail' : null,
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () {
-              if (formKey.currentState!.validate()) Navigator.pop(ctx, true);
-            },
-            child: const Text('Submit'),
-          ),
-        ],
-      ),
-    );
-
-    final details = detailsController.text.trim();
-    detailsController.dispose();
-    if (submitted != true || _uid == null) return;
-
-    try {
-      await AttendanceRequestDoc.collection.add(AttendanceRequestDoc.newRequest(
-        studentId: _uid!,
-        eventId: eventId,
-        requestDetails: details,
-      ));
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Request sent to the HOD for review.')),
-        );
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(friendlyError(e)), backgroundColor: AppColors.error),
-        );
-      }
-    }
-  }
 }
 
 class _AttendanceCard extends StatelessWidget {
-  final AttendanceRequestDoc request;
-  const _AttendanceCard({required this.request});
+  final QueryDocumentSnapshot<Map<String, dynamic>> doc;
+  const _AttendanceCard({required this.doc});
 
   @override
   Widget build(BuildContext context) {
-    final color = switch (request.status) {
-      'approved' => AppColors.success,
-      'rejected' => AppColors.error,
-      _ => AppColors.warning,
-    };
+    final data = doc.data();
+    final eventId = doc.reference.parent.parent!.id;
+    final session = data['session'] as String? ?? 'full';
+    final scannedAt = (data['scannedAt'] as Timestamp?)?.toDate();
 
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            FutureBuilder(
-              future: EventDoc.docRef(request.eventId).get(),
-              builder: (context, snapshot) => Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      snapshot.data?.data()?['title'] as String? ?? 'Event',
-                      style: GoogleFonts.poppins(fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                  TagChip(label: request.status, color: color),
-                ],
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(request.requestDetails, style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary)),
-            if ((request.reviewNotes ?? '').isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                'HOD note: ${request.reviewNotes}',
-                style: GoogleFonts.poppins(fontSize: 12, fontStyle: FontStyle.italic),
-              ),
-            ],
-          ],
+      margin: const EdgeInsets.only(bottom: 12),
+      child: ListTile(
+        onTap: () => context.push('/events/$eventId'),
+        leading: const Icon(Icons.qr_code_scanner_rounded, color: AppColors.success),
+        title: FutureBuilder(
+          future: EventDoc.docRef(eventId).get(),
+          builder: (context, snapshot) => Text(
+            snapshot.data?.data()?['title'] as String? ?? 'Event',
+            style: GoogleFonts.poppins(fontWeight: FontWeight.w700),
+          ),
         ),
+        subtitle: Text(
+          [
+            if (session != 'full') (session == 'morning' ? 'Morning session' : 'Afternoon session'),
+            if (scannedAt != null) timeago.format(scannedAt),
+          ].join(' · '),
+          style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary),
+        ),
+        trailing: const TagChip(label: 'Present', color: AppColors.success),
       ),
     );
   }

@@ -23,7 +23,6 @@ final adminStatsProvider = FutureProvider.autoDispose<List<_Stat>>((ref) async {
     final c = await Future.wait([
       count(db.collection('events').where('status', isEqualTo: 'approved').where('eventDate', isGreaterThanOrEqualTo: now)),
       count(db.collection('events').where('status', isEqualTo: 'pending')),
-      count(db.collection('attendanceRequests').where('status', isEqualTo: 'pending')),
       count(db.collection('memoryFrames').where('status', isEqualTo: 'pending')),
       count(db.collection('users').where('role', isEqualTo: 'student')),
       count(db.collection('users').where('status', isEqualTo: 'pending_batch_review')),
@@ -32,11 +31,10 @@ final adminStatsProvider = FutureProvider.autoDispose<List<_Stat>>((ref) async {
     return [
       ('Upcoming events', Icons.event_available_rounded, AppColors.accent, c[0]),
       ('Event approvals', Icons.rate_review_outlined, AppColors.error, c[1]),
-      ('Pending attendance', Icons.fact_check_outlined, AppColors.warning, c[2]),
-      ('Moderation queue', Icons.shield_outlined, AppColors.error, c[3]),
-      ('Students', Icons.people_outline_rounded, AppColors.success, c[4]),
-      ('Batch reviews', Icons.flag_outlined, AppColors.warning, c[5]),
-      ('Projects', Icons.folder_outlined, AppColors.secondary, c[6]),
+      ('Moderation queue', Icons.shield_outlined, AppColors.error, c[2]),
+      ('Students', Icons.people_outline_rounded, AppColors.success, c[3]),
+      ('Batch reviews', Icons.flag_outlined, AppColors.warning, c[4]),
+      ('Projects', Icons.folder_outlined, AppColors.secondary, c[5]),
     ];
   }
 

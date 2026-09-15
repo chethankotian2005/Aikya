@@ -42,6 +42,7 @@ class _EventCreationScreenState extends ConsumerState<EventCreationScreen> {
   DateTime? _end;
   DateTime? _deadline;
   Set<String> _targetYears = {}; // empty = open to every year
+  bool _fullDayEvent = false;
   List<RegistrationField> _fields = const [
     RegistrationField(label: 'Full Name'),
     RegistrationField(label: 'Phone', type: FieldType.phone),
@@ -92,6 +93,7 @@ class _EventCreationScreenState extends ConsumerState<EventCreationScreen> {
         _existingBannerUrl = event.bannerUrl;
         _currentRegistrations = event.currentRegistrations;
         _targetYears = event.targetYears.toSet();
+        _fullDayEvent = event.sessions.length > 1;
       });
     } catch (e) {
       if (mounted) {
@@ -175,6 +177,7 @@ class _EventCreationScreenState extends ConsumerState<EventCreationScreen> {
           bannerUrl: bannerUrl,
           createdBy: user.uid,
           targetYears: _targetYears.toList(),
+          sessions: _fullDayEvent ? const ['morning', 'afternoon'] : const ['full'],
         )
           ..remove('createdBy')
           ..remove('currentRegistrations')
@@ -198,6 +201,7 @@ class _EventCreationScreenState extends ConsumerState<EventCreationScreen> {
           'club': club,
           'bannerUrl': bannerUrl,
           'targetYears': _targetYears.toList(),
+          'fullDayEvent': _fullDayEvent,
         });
         successMessage =
             result['status'] == 'pending' ? 'Submitted — the HOD will review it shortly' : 'Event published';
@@ -323,6 +327,15 @@ class _EventCreationScreenState extends ConsumerState<EventCreationScreen> {
                           }),
                         ),
                     ],
+                  ),
+                  const SizedBox(height: 24),
+                  _section('Attendance'),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: _fullDayEvent,
+                    onChanged: (v) => setState(() => _fullDayEvent = v),
+                    title: const Text('Full-day event'),
+                    subtitle: const Text('Generates separate morning and afternoon QR attendance sessions.'),
                   ),
                   const SizedBox(height: 24),
                   _section('Banner (optional)'),

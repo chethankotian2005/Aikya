@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/theme/app_tokens.dart';
 import '../../features/auth/data/user_doc.dart';
@@ -73,6 +74,23 @@ class _EventRow extends ConsumerStatefulWidget {
 
 class _EventRowState extends ConsumerState<_EventRow> {
   bool _busy = false;
+  bool _generatingSheet = false;
+
+  Future<void> _downloadAttendanceSheet(BuildContext context) async {
+    setState(() => _generatingSheet = true);
+    try {
+      final url = await ref.read(renderApiServiceProvider).generateAttendanceSheet(eventId: widget.event.id);
+      if (url.isNotEmpty) await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(friendlyError(e)), backgroundColor: AppColors.error),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _generatingSheet = false);
+    }
+  }
 
   Future<void> _delete(BuildContext context) async {
     final confirmed = await showDialog<bool>(
@@ -184,6 +202,14 @@ class _EventRowState extends ConsumerState<_EventRow> {
                 switch (action) {
                   case 'edit':
                     context.push('/admin/events/edit/${event.id}');
+                  case 'scan':
+                    context.push('/admin/scan-attendance', extra: {
+                      'eventId': event.id,
+                      'eventTitle': event.title,
+                      'sessions': event.sessions,
+                    });
+                  case 'sheet':
+                    _downloadAttendanceSheet(context);
                   case 'report':
                     context.push('/admin/report', extra: event.id);
                   case 'delete':
@@ -192,6 +218,12 @@ class _EventRowState extends ConsumerState<_EventRow> {
               },
               itemBuilder: (_) => [
                 const PopupMenuItem(value: 'edit', child: Text('Edit')),
+                const PopupMenuItem(value: 'scan', child: Text('Scan attendance')),
+                PopupMenuItem(
+                  value: 'sheet',
+                  enabled: !_generatingSheet,
+                  child: Text(_generatingSheet ? 'Generating…' : 'Attendance sheet'),
+                ),
                 const PopupMenuItem(value: 'report', child: Text('Generate report')),
                 const PopupMenuItem(value: 'delete', child: Text('Delete')),
               ],

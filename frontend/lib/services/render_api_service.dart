@@ -112,12 +112,24 @@ class RenderApiService {
     return _send('POST', '/sentiment-rollup', {'eventId': eventId});
   }
 
-  /// POST /api/messaging/attendance/{approve|reject}
-  Future<void> reviewAttendance({required String requestId, required bool approve, String note = ''}) {
-    return _send('POST', '/messaging/attendance/${approve ? 'approve' : 'reject'}', {
-      'requestId': requestId,
-      'note': note,
+  /// POST /api/attendance/scan — records a QR check-in; returns
+  /// {success, alreadyMarked, studentName, usn}.
+  Future<Map<String, dynamic>> scanAttendance({
+    required String eventId,
+    required String studentUid,
+    required String session,
+  }) {
+    return _send('POST', '/attendance/scan', {
+      'eventId': eventId,
+      'studentUid': studentUid,
+      'session': session,
     });
+  }
+
+  /// POST /api/attendance/sheet — returns {success, pdfUrl}.
+  Future<String> generateAttendanceSheet({required String eventId}) async {
+    final data = await _send('POST', '/attendance/sheet', {'eventId': eventId});
+    return data['pdfUrl'] as String? ?? '';
   }
 
   /// POST /api/messaging/memory-frame/{approve|reject}

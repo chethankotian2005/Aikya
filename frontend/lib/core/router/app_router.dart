@@ -10,6 +10,7 @@ import '../../features/auth/presentation/profile_setup_screen.dart';
 import '../../features/auth/presentation/signup_view.dart';
 import '../../screens/admin/admin_report_generator_view.dart';
 import '../../screens/admin/admin_shell_screen.dart';
+import '../../screens/admin/attendance_scanner_screen.dart';
 import '../../screens/admin/event_creation_screen.dart';
 import '../../screens/alumni_directory_screen.dart';
 import '../../screens/create_update_screen.dart';
@@ -118,6 +119,17 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/admin/report',
         builder: (_, state) => AdminReportGeneratorView(eventId: state.extra as String?),
+      ),
+      GoRoute(
+        path: '/admin/scan-attendance',
+        builder: (_, state) {
+          final extra = state.extra as Map<String, dynamic>;
+          return AttendanceScannerScreen(
+            eventId: extra['eventId'] as String,
+            eventTitle: extra['eventTitle'] as String,
+            sessions: (extra['sessions'] as List).cast<String>(),
+          );
+        },
       ),
     ],
   );

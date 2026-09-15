@@ -36,6 +36,11 @@ class EventDoc {
   /// senior-only workshop). Empty = open to every year.
   final List<String> targetYears;
 
+  /// Attendance-tracking sessions: ['full'] normally, or
+  /// ['morning','afternoon'] for a full-day event with two separate QR
+  /// check-ins.
+  final List<String> sessions;
+
   const EventDoc({
     required this.id,
     required this.title,
@@ -57,6 +62,7 @@ class EventDoc {
     this.status,
     this.reviewNotes,
     this.targetYears = const [],
+    this.sessions = const ['full'],
   });
 
   bool isOpenToYear(String? studentYear) =>
@@ -103,6 +109,7 @@ class EventDoc {
       status: data['status'] as String?,
       reviewNotes: data['reviewNotes'] as String?,
       targetYears: (data['targetYears'] as List?)?.map((y) => y.toString()).toList() ?? const [],
+      sessions: (data['sessions'] as List?)?.map((s) => s.toString()).toList() ?? const ['full'],
     );
   }
 
@@ -124,6 +131,7 @@ class EventDoc {
     String? bannerUrl,
     required String createdBy,
     List<String> targetYears = const [],
+    List<String> sessions = const ['full'],
   }) {
     return {
       'title': title,
@@ -141,6 +149,7 @@ class EventDoc {
       'createdBy': createdBy,
       'createdAt': FieldValue.serverTimestamp(),
       'targetYears': targetYears,
+      'sessions': sessions,
     };
   }
 

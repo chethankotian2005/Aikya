@@ -10,7 +10,6 @@ import '../../services/firebase_service.dart';
 import '../../widgets/shared_widgets.dart';
 import 'admin_accreditation_compiler_view.dart';
 import 'admin_analytics_view.dart';
-import 'admin_attendance_requests_view.dart';
 import 'admin_batch_config_view.dart';
 import 'admin_dashboard_view.dart';
 import 'admin_manage_events_view.dart';
@@ -45,7 +44,6 @@ class _AdminShellScreenState extends ConsumerState<AdminShellScreen> {
     _NavItem('Analytics', Icons.insights_outlined, () => const AdminAnalyticsView()),
     _NavItem('Accreditation', Icons.verified_outlined, () => const AdminAccreditationCompilerView(), hodOnly: true),
     _NavItem('Moderation', Icons.shield_outlined, () => const AdminModerationQueueView(), hodOnly: true),
-    _NavItem('Attendance', Icons.fact_check_outlined, () => const AdminAttendanceRequestsView(), hodOnly: true),
     _NavItem('Batch Config', Icons.tune_rounded, () => const AdminBatchConfigView(), hodOnly: true),
     _NavItem('Staff', Icons.badge_outlined, () => const AdminStaffProvisioningView(), hodOnly: true),
   ];
