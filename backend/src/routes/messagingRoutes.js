@@ -4,8 +4,6 @@
  *
  *   POST /api/messaging/updates                  faculty, coordinator, hod
  *   POST /api/messaging/events                   coordinator, hod
- *   POST /api/messaging/attendance/approve       hod
- *   POST /api/messaging/attendance/reject        hod
  *   POST /api/messaging/memory-frame/approve     hod
  *   POST /api/messaging/memory-frame/reject      hod
  *   POST /api/messaging/event/approve            hod
@@ -225,7 +223,7 @@ router.post(
 function reviewRoute({ collection, ownerField, settingKey, status, notificationFor }) {
   return async (req, res) => {
     try {
-      const id = req.body.requestId ?? req.body.memoryId ?? req.body.eventId;
+      const id = req.body.memoryId ?? req.body.eventId;
       const note = typeof req.body.note === 'string' ? req.body.note.trim().slice(0, 500) : '';
 
       if (!id || typeof id !== 'string') {
@@ -271,17 +269,6 @@ function reviewRoute({ collection, ownerField, settingKey, status, notificationF
   };
 }
 
-const attendanceNotification = (status) => ({ item, eventTitle, note }) => ({
-  notification: {
-    title: status === 'approved' ? 'Attendance Approved ✅' : 'Attendance Rejected ❌',
-    body:
-      status === 'approved'
-        ? `Your attendance for "${eventTitle}" has been approved.`
-        : `Your attendance for "${eventTitle}" was rejected.${note ? ` Note: ${note}` : ''}`,
-  },
-  data: { type: 'attendance', eventId: item.eventId || '' },
-});
-
 const memoryNotification = (status) => ({ id, eventTitle, note }) => ({
   notification: {
     title: status === 'approved' ? 'Memory Approved \u{1F4F8}' : 'Memory Not Approved',
@@ -319,19 +306,6 @@ const eventNotification = (status) => ({ id, item, note }) => ({
 
 for (const status of ['approved', 'rejected']) {
   const action = status === 'approved' ? 'approve' : 'reject';
-
-  router.post(
-    `/attendance/${action}`,
-    verifyAuth,
-    requireRole('hod'),
-    reviewRoute({
-      collection: 'attendanceRequests',
-      ownerField: 'studentId',
-      settingKey: 'eventsEnabled',
-      status,
-      notificationFor: attendanceNotification(status),
-    }),
-  );
 
   router.post(
     `/event/${action}`,

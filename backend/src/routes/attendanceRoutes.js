@@ -67,6 +67,7 @@ router.post('/attendance/scan', verifyAuth, requireRole('faculty', 'coordinator'
     }
 
     await recordRef.set({
+      eventId,
       studentUid,
       studentName: student.fullName,
       usn: student.usn || null,
