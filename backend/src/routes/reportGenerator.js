@@ -21,7 +21,7 @@
 import { Router } from 'express';
 import admin from 'firebase-admin';
 import { verifyAuth, requireRole } from '../middleware/verifyAuth.js';
-import { GEMINI_MODEL, geminiLimiter, geminiModel } from '../utils/gemini.js';
+import { GEMINI_MODEL, generateWithRetry, geminiLimiter, geminiModel } from '../utils/gemini.js';
 import { getEventForStaff } from '../utils/eventAccess.js';
 
 const router = Router();
@@ -86,7 +86,7 @@ ${additionalContext ? `\n--- ADDITIONAL CONTEXT ---\n${additionalContext}` : ''}
 
 Generate a comprehensive, formatted Markdown report.`;
 
-      const result = await geminiModel(SYSTEM_PROMPT).generateContent(userPrompt);
+      const result = await generateWithRetry(geminiModel(SYSTEM_PROMPT), userPrompt);
       const markdown = result.response.text();
 
       if (eventId) {

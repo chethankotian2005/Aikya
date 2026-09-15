@@ -21,3 +21,24 @@ export function geminiModel(systemInstruction) {
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
   return genAI.getGenerativeModel({ model: GEMINI_MODEL, systemInstruction });
 }
+
+/**
+ * Gemini's shared/free tier returns transient 503 "model overloaded" errors
+ * fairly often — observed failing ~1 in 2-3 real requests in production.
+ * One retry with a short backoff clears almost all of them without making
+ * the user click "try again" themselves.
+ */
+export async function generateWithRetry(model, prompt, { retries = 2, delayMs = 1500 } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await model.generateContent(prompt);
+    } catch (err) {
+      lastErr = err;
+      const overloaded = err.status === 503 || /overloaded|unavailable/i.test(err.message || '');
+      if (!overloaded || attempt === retries) throw err;
+      await new Promise((resolve) => setTimeout(resolve, delayMs * (attempt + 1)));
+    }
+  }
+  throw lastErr;
+}

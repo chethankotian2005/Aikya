@@ -16,7 +16,7 @@
 import { Router } from 'express';
 import admin from 'firebase-admin';
 import { verifyAuth, requireRole } from '../middleware/verifyAuth.js';
-import { geminiLimiter, geminiModel } from '../utils/gemini.js';
+import { generateWithRetry, geminiLimiter, geminiModel } from '../utils/gemini.js';
 import { getEventForStaff } from '../utils/eventAccess.js';
 
 const router = Router();
@@ -44,7 +44,7 @@ Return ONLY a valid JSON array, no markdown fences, no extra text.
 Comments:
 ${comments.map((c) => `[ID: ${c.id}] "${c.text}"`).join('\n')}`;
 
-  const result = await model.generateContent(prompt);
+  const result = await generateWithRetry(model, prompt);
   const text = result.response.text().trim();
   const cleaned = text.replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '');
 

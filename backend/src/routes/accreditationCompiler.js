@@ -19,7 +19,7 @@ import { Router } from 'express';
 import admin from 'firebase-admin';
 import PDFDocument from 'pdfkit';
 import { verifyAuth, requireRole } from '../middleware/verifyAuth.js';
-import { geminiLimiter, geminiModel } from '../utils/gemini.js';
+import { generateWithRetry, geminiLimiter, geminiModel } from '../utils/gemini.js';
 import { uploadRawToCloudinary } from '../utils/cloudinary.js';
 
 const router = Router();
@@ -185,7 +185,7 @@ ${JSON.stringify(events, null, 2)}
 
 Generate a complete, structured Markdown accreditation document.`;
 
-      const result = await geminiModel(SYSTEM_PROMPT).generateContent(prompt);
+      const result = await generateWithRetry(geminiModel(SYSTEM_PROMPT), prompt);
       const markdown = result.response.text();
 
       const pdfBuffer = await renderPdf(`Accreditation Report — ${label}`, markdown);
