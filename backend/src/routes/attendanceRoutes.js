@@ -102,9 +102,10 @@ function renderAttendanceSheetPdf(eventTitle, sessions, rowsBySession) {
     const sessionLabels = { full: 'Attendance', morning: 'Morning Session', afternoon: 'Afternoon Session' };
     for (const session of sessions) {
       const rows = rowsBySession[session] || [];
-      doc.fontSize(13).font('Helvetica-Bold').fillColor('#0E1B3D').text(sessionLabels[session] || session);
+      const left = doc.page.margins.left;
+      doc.fontSize(13).font('Helvetica-Bold').fillColor('#0E1B3D').text(sessionLabels[session] || session, left, doc.y);
       doc.moveDown(0.3);
-      doc.fontSize(9.5).font('Helvetica').fillColor('#4A5A7A').text(`${rows.length} student(s) present`);
+      doc.fontSize(9.5).font('Helvetica').fillColor('#4A5A7A').text(`${rows.length} student(s) present`, left, doc.y);
       doc.moveDown(0.5);
 
       const colUsn = doc.page.margins.left;
