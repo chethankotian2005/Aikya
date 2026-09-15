@@ -4,7 +4,11 @@ import { useEffect, useState } from "react";
 import { Download, X } from "lucide-react";
 
 // Overwritten on every successful push to main by .github/workflows/build-apk.yml —
-// always resolves to the current build, no GitHub auth required (public repo).
+// this path always resolves to the current build, no GitHub auth required
+// (public repo). GitHub itself marks that redirect no-cache, but browsers
+// and Android's download manager still dedupe/serve-from-cache by URL, so a
+// cache-busting query param is appended per click to force a fresh fetch
+// every time instead of silently reusing a previously downloaded file.
 const APK_URL = "https://github.com/chethankotian2005/Aikya/releases/download/apk-latest/aikya.apk";
 
 type Platform = "android" | "ios" | "other";
@@ -38,6 +42,11 @@ export function InstallBanner() {
     setShowBanner(false);
   };
 
+  const handleInstallClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    window.location.href = `${APK_URL}?t=${Date.now()}`;
+  };
+
   if (!showBanner || !platform) return null;
 
   return (
@@ -57,6 +66,7 @@ export function InstallBanner() {
         {platform === "android" && (
           <a
             href={APK_URL}
+            onClick={handleInstallClick}
             className="bg-accent hover:bg-accent-hover text-on-primary text-sm font-medium px-4 py-1.5 rounded-full transition-colors"
           >
             Install
