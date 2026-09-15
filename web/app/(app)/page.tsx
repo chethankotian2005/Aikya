@@ -25,7 +25,7 @@ export default function Home() {
   useEffect(() => {
     Promise.all([
       countOf(collection(db, "projects")),
-      countOf(query(collection(db, "events"), where("eventDate", ">=", Timestamp.now()))),
+      countOf(query(collection(db, "events"), where("status", "==", "approved"), where("eventDate", ">=", Timestamp.now()))),
       countOf(query(collection(db, "users"), where("role", "==", "student"))),
       countOf(collection(db, "alumniProfiles")),
     ])
@@ -34,7 +34,14 @@ export default function Home() {
   }, []);
 
   const events = useLiveQuery(
-    () => query(collection(db, "events"), where("eventDate", ">=", Timestamp.now()), orderBy("eventDate"), limit(6)),
+    () =>
+      query(
+        collection(db, "events"),
+        where("status", "==", "approved"),
+        where("eventDate", ">=", Timestamp.now()),
+        orderBy("eventDate"),
+        limit(6),
+      ),
     toEvent,
     [],
   );

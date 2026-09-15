@@ -31,9 +31,10 @@ export default function EventsHub() {
     () => {
       if (segment === "mine") return null;
       const now = Timestamp.now();
+      const approved = query(collection(db, "events"), where("status", "==", "approved"));
       return segment === "upcoming"
-        ? query(collection(db, "events"), where("eventDate", ">=", now), orderBy("eventDate"), limit(pageSize))
-        : query(collection(db, "events"), where("eventDate", "<", now), orderBy("eventDate", "desc"), limit(pageSize));
+        ? query(approved, where("eventDate", ">=", now), orderBy("eventDate"), limit(pageSize))
+        : query(approved, where("eventDate", "<", now), orderBy("eventDate", "desc"), limit(pageSize));
     },
     toEvent,
     [segment, pageSize],

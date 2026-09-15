@@ -139,6 +139,9 @@ export interface EventItem {
   createdBy: string;
   reportMarkdown: string | null;
   sentiment: { positive: number; neutral: number; negative: number } | null;
+  /** 'pending' (coordinator-created, awaiting HOD review), 'approved', or 'rejected'. */
+  status: string | null;
+  reviewNotes: string | null;
 }
 
 export function toEvent(id: string, d: Record<string, unknown>): EventItem {
@@ -164,6 +167,8 @@ export function toEvent(id: string, d: Record<string, unknown>): EventItem {
     createdBy: str(d.createdBy),
     reportMarkdown: optStr(report?.markdown),
     sentiment: sentiment ?? null,
+    status: optStr(d.status),
+    reviewNotes: optStr(d.reviewNotes),
   };
 }
 

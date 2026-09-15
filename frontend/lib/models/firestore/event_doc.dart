@@ -26,6 +26,12 @@ class EventDoc {
   final String? reportMarkdown;
   final Map<String, int>? sentimentPercentages;
 
+  /// 'pending' (coordinator-created, awaiting HOD review), 'approved', or
+  /// 'rejected'. Older events written before this field existed are treated
+  /// as approved (see EventDoc.status getter).
+  final String? status;
+  final String? reviewNotes;
+
   const EventDoc({
     required this.id,
     required this.title,
@@ -44,7 +50,12 @@ class EventDoc {
     this.createdAt,
     this.reportMarkdown,
     this.sentimentPercentages,
+    this.status,
+    this.reviewNotes,
   });
+
+  bool get isPending => status == 'pending';
+  bool get isRejected => status == 'rejected';
 
   bool get isFull => currentRegistrations >= maxCapacity;
   bool get isPast => (endDate ?? eventDate).isBefore(DateTime.now());
@@ -81,6 +92,8 @@ class EventDoc {
       sentimentPercentages: percentages is Map
           ? percentages.map((k, v) => MapEntry(k as String, (v as num).toInt()))
           : null,
+      status: data['status'] as String?,
+      reviewNotes: data['reviewNotes'] as String?,
     );
   }
 

@@ -3,13 +3,22 @@
  * (spec §2/§7 — avoids Cloud Functions).
  *
  *   POST /api/messaging/updates                  faculty, coordinator, hod
+ *   POST /api/messaging/events                   coordinator, hod
  *   POST /api/messaging/attendance/approve       hod
  *   POST /api/messaging/attendance/reject        hod
  *   POST /api/messaging/memory-frame/approve     hod
  *   POST /api/messaging/memory-frame/reject      hod
+ *   POST /api/messaging/event/approve            hod
+ *   POST /api/messaging/event/reject             hod
  *
  * Author, reviewer and timestamps are always taken from the verified
  * caller — never from the request body.
+ *
+ * Events created by a coordinator start as `status: 'pending'` and are
+ * invisible to everyone but their creator and the HOD until an HOD approves
+ * them (an HOD's own events are auto-approved — they're already the
+ * approver). This is why event creation goes through the backend at all
+ * instead of a direct client Firestore write like most collections.
  */
 
 import express from 'express';
@@ -40,6 +49,11 @@ async function notifyUser(uid, settingKey, notification, data) {
   if (!fcmToken || notificationSettings?.[settingKey] === false) return;
 
   await sendNotification({ notification, token: fcmToken, data });
+}
+
+async function notifyHods(settingKey, notification, data) {
+  const snap = await db().collection('users').where('role', '==', 'hod').get();
+  await Promise.all(snap.docs.map((doc) => notifyUser(doc.id, settingKey, notification, data)));
 }
 
 router.post(
@@ -99,13 +113,89 @@ router.post(
   },
 );
 
+router.post(
+  '/events',
+  verifyAuth,
+  requireRole('coordinator', 'hod'),
+  async (req, res) => {
+    try {
+      const {
+        title, description, venue, eventDate, endDate, maxCapacity,
+        registrationDeadline, formFields, tag, club, bannerUrl,
+      } = req.body;
+
+      if (typeof title !== 'string' || title.trim().length < 3 || title.length > 120) {
+        return res.status(400).json({ error: 'Title must be 3-120 characters.' });
+      }
+      if (typeof description !== 'string' || !description.trim()) {
+        return res.status(400).json({ error: 'Description is required.' });
+      }
+      if (typeof venue !== 'string' || !venue.trim()) {
+        return res.status(400).json({ error: 'Venue is required.' });
+      }
+      const parsedEventDate = new Date(eventDate);
+      if (Number.isNaN(parsedEventDate.getTime())) {
+        return res.status(400).json({ error: 'A valid eventDate is required.' });
+      }
+      let parsedEndDate = null;
+      if (endDate) {
+        parsedEndDate = new Date(endDate);
+        if (Number.isNaN(parsedEndDate.getTime())) {
+          return res.status(400).json({ error: 'Invalid endDate.' });
+        }
+      }
+      if (!Number.isInteger(maxCapacity) || maxCapacity < 1) {
+        return res.status(400).json({ error: 'maxCapacity must be a positive integer.' });
+      }
+      const parsedDeadline = new Date(registrationDeadline);
+      if (Number.isNaN(parsedDeadline.getTime())) {
+        return res.status(400).json({ error: 'A valid registrationDeadline is required.' });
+      }
+
+      const status = req.role === 'hod' ? 'approved' : 'pending';
+
+      const eventDoc = {
+        title: title.trim(),
+        description: description.trim(),
+        venue: venue.trim(),
+        eventDate: Timestamp.fromDate(parsedEventDate),
+        endDate: parsedEndDate ? Timestamp.fromDate(parsedEndDate) : null,
+        maxCapacity,
+        currentRegistrations: 0,
+        registrationDeadline: Timestamp.fromDate(parsedDeadline),
+        customFormSchema: { fields: Array.isArray(formFields) ? formFields : [] },
+        tag: typeof tag === 'string' && tag ? tag : 'General',
+        club: req.role === 'coordinator' ? req.club : (typeof club === 'string' && club ? club : null),
+        bannerUrl: typeof bannerUrl === 'string' && bannerUrl ? bannerUrl : null,
+        status,
+        createdBy: req.uid,
+        createdAt: FieldValue.serverTimestamp(),
+      };
+
+      const ref = await db().collection('events').add(eventDoc);
+
+      if (status === 'pending') {
+        await notifyHods('eventsEnabled', {
+          title: 'Event awaiting approval',
+          body: `${req.userName || 'A coordinator'} submitted "${eventDoc.title}" for review.`,
+        }, { type: 'event_review', eventId: ref.id });
+      }
+
+      res.status(200).json({ success: true, id: ref.id, status });
+    } catch (error) {
+      console.error('Error creating event:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  },
+);
+
 /**
  * Shared pending → approved/rejected review for attendance requests and memory frames.
  */
 function reviewRoute({ collection, ownerField, settingKey, status, notificationFor }) {
   return async (req, res) => {
     try {
-      const id = req.body.requestId ?? req.body.memoryId;
+      const id = req.body.requestId ?? req.body.memoryId ?? req.body.eventId;
       const note = typeof req.body.note === 'string' ? req.body.note.trim().slice(0, 500) : '';
 
       if (!id || typeof id !== 'string') {
@@ -169,6 +259,17 @@ const memoryNotification = (status) => ({ id, eventTitle, note }) => ({
   data: { type: 'memory_frame', memoryId: id },
 });
 
+const eventNotification = (status) => ({ id, item, note }) => ({
+  notification: {
+    title: status === 'approved' ? 'Event Approved ✅' : 'Event Rejected',
+    body:
+      status === 'approved'
+        ? `Your event "${item.title}" is now live.`
+        : `Your event "${item.title}" was rejected.${note ? ` Note: ${note}` : ''}`,
+  },
+  data: { type: 'event_review', eventId: id },
+});
+
 for (const status of ['approved', 'rejected']) {
   const action = status === 'approved' ? 'approve' : 'reject';
 
@@ -182,6 +283,19 @@ for (const status of ['approved', 'rejected']) {
       settingKey: 'eventsEnabled',
       status,
       notificationFor: attendanceNotification(status),
+    }),
+  );
+
+  router.post(
+    `/event/${action}`,
+    verifyAuth,
+    requireRole('hod'),
+    reviewRoute({
+      collection: 'events',
+      ownerField: 'createdBy',
+      settingKey: 'eventsEnabled',
+      status,
+      notificationFor: eventNotification(status),
     }),
   );
 

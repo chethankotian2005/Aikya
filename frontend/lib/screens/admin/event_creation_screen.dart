@@ -11,6 +11,7 @@ import '../../features/auth/data/user_doc.dart';
 import '../../models/event_model.dart';
 import '../../models/firestore/event_doc.dart';
 import '../../services/firebase_service.dart';
+import '../../services/render_api_service.dart';
 import '../../utils/friendly_error.dart';
 import '../../utils/image_upload.dart';
 import '../events_hub_screen.dart' show formatEventDate;
@@ -153,35 +154,54 @@ class _EventCreationScreenState extends ConsumerState<EventCreationScreen> {
       final banner = _banner;
       final bannerUrl = banner == null ? _existingBannerUrl : await uploadImage(banner, UploadFolder.eventBanners);
       final club = user.role == UserRole.coordinator ? user.club : _club;
-      final data = EventDoc.newEventData(
-        title: _titleController.text.trim(),
-        description: _descriptionController.text.trim(),
-        venue: _venueController.text.trim(),
-        eventDate: _start!,
-        endDate: _end,
-        maxCapacity: int.parse(_capacityController.text.trim()),
-        registrationDeadline: _deadline ?? _start!,
-        formFields: _fields,
-        tag: _tag,
-        club: club,
-        bannerUrl: bannerUrl,
-        createdBy: user.uid,
-      );
 
+      String successMessage;
       if (_isEdit) {
-        // Never touch ownership or the live registration counter on edit.
-        data
+        // Never touch ownership, the live registration counter or the
+        // review status on edit — a coordinator can't self-approve.
+        final data = EventDoc.newEventData(
+          title: _titleController.text.trim(),
+          description: _descriptionController.text.trim(),
+          venue: _venueController.text.trim(),
+          eventDate: _start!,
+          endDate: _end,
+          maxCapacity: int.parse(_capacityController.text.trim()),
+          registrationDeadline: _deadline ?? _start!,
+          formFields: _fields,
+          tag: _tag,
+          club: club,
+          bannerUrl: bannerUrl,
+          createdBy: user.uid,
+        )
           ..remove('createdBy')
           ..remove('currentRegistrations')
           ..remove('createdAt');
         await EventDoc.docRef(widget.eventId!).update(data);
+        successMessage = 'Event updated';
       } else {
-        await EventDoc.collection.add(data);
+        // Goes through the backend so a coordinator's event notifies the
+        // HOD for approval in the same request (an HOD's own event is
+        // auto-approved).
+        final result = await ref.read(renderApiServiceProvider).createEvent({
+          'title': _titleController.text.trim(),
+          'description': _descriptionController.text.trim(),
+          'venue': _venueController.text.trim(),
+          'eventDate': _start!.toIso8601String(),
+          'endDate': _end?.toIso8601String(),
+          'maxCapacity': int.parse(_capacityController.text.trim()),
+          'registrationDeadline': (_deadline ?? _start!).toIso8601String(),
+          'formFields': _fields.map((f) => f.toMap()).toList(),
+          'tag': _tag,
+          'club': club,
+          'bannerUrl': bannerUrl,
+        });
+        successMessage =
+            result['status'] == 'pending' ? 'Submitted — the HOD will review it shortly' : 'Event published';
       }
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_isEdit ? 'Event updated' : 'Event published'), backgroundColor: AppColors.success),
+        SnackBar(content: Text(successMessage), backgroundColor: AppColors.success),
       );
       context.pop();
     } catch (e) {
@@ -274,17 +294,18 @@ class _EventCreationScreenState extends ConsumerState<EventCreationScreen> {
                   _section('Banner (optional)'),
                   GestureDetector(
                     onTap: _pickBanner,
-                    child: AspectRatio(
-                      aspectRatio: 16 / 9,
+                    child: SizedBox(
+                      height: 320,
+                      width: double.infinity,
                       child: Container(
                         decoration: BoxDecoration(
                           color: AppColors.primaryContainer,
                           borderRadius: AppRadius.borderRadiusLg,
                           border: Border.all(color: AppColors.border),
                           image: _bannerPreview != null
-                              ? DecorationImage(image: MemoryImage(_bannerPreview!), fit: BoxFit.cover)
+                              ? DecorationImage(image: MemoryImage(_bannerPreview!), fit: BoxFit.contain)
                               : _existingBannerUrl != null
-                                  ? DecorationImage(image: NetworkImage(_existingBannerUrl!), fit: BoxFit.cover)
+                                  ? DecorationImage(image: NetworkImage(_existingBannerUrl!), fit: BoxFit.contain)
                                   : null,
                         ),
                         child: _bannerPreview == null && _existingBannerUrl == null
@@ -294,7 +315,7 @@ class _EventCreationScreenState extends ConsumerState<EventCreationScreen> {
                                   children: [
                                     Icon(Icons.cloud_upload_outlined, color: AppColors.accent, size: 32),
                                     SizedBox(height: 8),
-                                    Text('Tap to upload a 16:9 banner'),
+                                    Text('Tap to upload a poster — any size works'),
                                   ],
                                 ),
                               )

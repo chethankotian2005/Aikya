@@ -14,10 +14,13 @@ const ALLOWED_PATHS = new Set([
   "sentiment-rollup",
   "upload-image",
   "messaging/updates",
+  "messaging/events",
   "messaging/attendance/approve",
   "messaging/attendance/reject",
   "messaging/memory-frame/approve",
   "messaging/memory-frame/reject",
+  "messaging/event/approve",
+  "messaging/event/reject",
   "admin/provision-staff",
 ]);
 

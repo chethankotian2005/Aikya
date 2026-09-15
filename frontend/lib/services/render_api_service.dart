@@ -73,6 +73,12 @@ class RenderApiService {
     });
   }
 
+  /// POST /api/messaging/events — a coordinator's event starts `pending`
+  /// (and notifies the HOD); an HOD's event is auto-approved. Returns the
+  /// new event's id and status.
+  Future<Map<String, dynamic>> createEvent(Map<String, dynamic> event) =>
+      _send('POST', '/messaging/events', event);
+
   /// POST /api/generate-report
   Future<String> generateReport({
     required String brief,
@@ -117,6 +123,14 @@ class RenderApiService {
   Future<void> reviewMemoryFrame({required String memoryId, required bool approve, String note = ''}) {
     return _send('POST', '/messaging/memory-frame/${approve ? 'approve' : 'reject'}', {
       'memoryId': memoryId,
+      'note': note,
+    });
+  }
+
+  /// POST /api/messaging/event/{approve|reject}
+  Future<void> reviewEvent({required String eventId, required bool approve, String note = ''}) {
+    return _send('POST', '/messaging/event/${approve ? 'approve' : 'reject'}', {
+      'eventId': eventId,
       'note': note,
     });
   }
