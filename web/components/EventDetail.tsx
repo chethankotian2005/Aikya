@@ -202,8 +202,8 @@ export default function EventDetail({ id }: { id: string }) {
     <div className="flex flex-col">
       <PageHeader title="Event" back />
 
-      <div className="relative mx-5 mt-2 h-52 overflow-hidden rounded-lg">
-        <BannerImage url={e.bannerUrl} alt={e.title} className="h-full w-full" />
+      <div className="relative mx-5 mt-2 h-[420px] overflow-hidden rounded-lg bg-primary">
+        <BannerImage url={e.bannerUrl} alt={e.title} className="h-full w-full" fit="contain" />
         <div className="absolute inset-0 bg-gradient-to-t from-primary/80 to-transparent" />
         <div className="absolute right-4 bottom-4 left-4">
           <TagChip label={e.tag} />

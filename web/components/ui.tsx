@@ -138,9 +138,30 @@ export function Fab({ href, icon: Icon, label }: { href: string; icon: LucideIco
   );
 }
 
-/** Image with a brand-gradient placeholder (event banners, project covers). */
-export function BannerImage({ url, alt, className = "" }: { url: string | null; alt: string; className?: string }) {
+/**
+ * Image with a brand-gradient placeholder (event banners, project covers).
+ * Most uploads are portrait event posters, not landscape banners — `fit`
+ * defaults to "cover" for list thumbnails (a small, consistent crop is fine
+ * there), but full-screen hero usage should pass "contain" so the whole
+ * poster stays visible; the gradient placeholder shows through behind it as
+ * letterboxing in that case.
+ */
+export function BannerImage({
+  url,
+  alt,
+  className = "",
+  fit = "cover",
+}: {
+  url: string | null;
+  alt: string;
+  className?: string;
+  fit?: "cover" | "contain";
+}) {
   if (!url) return <div className={`bg-brand-gradient ${className}`} aria-hidden />;
-  // eslint-disable-next-line @next/next/no-img-element
-  return <img src={url} alt={alt} className={`object-cover ${className}`} />;
+  return (
+    <div className={`relative bg-brand-gradient ${className}`}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={url} alt={alt} className={`absolute inset-0 h-full w-full ${fit === "contain" ? "object-contain" : "object-cover"}`} />
+    </div>
+  );
 }

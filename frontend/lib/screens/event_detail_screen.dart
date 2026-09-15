@@ -246,7 +246,7 @@ class _EventDetailScreenState extends ConsumerState<EventDetailScreen> {
 
   Widget _buildAppBar(EventDoc event) {
     return SliverAppBar(
-      expandedHeight: 220,
+      expandedHeight: 420,
       pinned: true,
       backgroundColor: AppColors.primary,
       foregroundColor: Colors.white,
@@ -254,7 +254,7 @@ class _EventDetailScreenState extends ConsumerState<EventDetailScreen> {
         background: Stack(
           fit: StackFit.expand,
           children: [
-            BannerImage(url: event.bannerUrl),
+            BannerImage(url: event.bannerUrl, fit: BoxFit.contain),
             const DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(

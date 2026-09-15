@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Timestamp, addDoc, collection, doc, getDoc, serverTimestamp, updateDoc } from "firebase/firestore";
+import { Timestamp, doc, getDoc, updateDoc } from "firebase/firestore";
 import { Plus, Trash2 } from "lucide-react";
 import { db } from "@/lib/firebase/firebase";
 import { useAuth } from "@/lib/auth-context";
+import { callBackend } from "@/lib/api";
 import { friendlyError } from "@/lib/errors";
 import { CLUBS, toEvent, type FieldType, type RegistrationField } from "@/lib/models";
 import { uploadImage } from "@/lib/upload";
@@ -94,31 +95,43 @@ export default function EventBuilder({ id }: { id?: string }) {
     setSaving(true);
     try {
       const url = banner ? await uploadImage(banner, "event_banners") : bannerUrl;
-      const data = {
-        title: title.trim(),
-        description: description.trim(),
-        venue: venue.trim(),
-        tag,
-        club: profile.role === "coordinator" ? profile.club : club || null,
-        eventDate: Timestamp.fromDate(startDate),
-        endDate: endDate ? Timestamp.fromDate(endDate) : null,
-        registrationDeadline: Timestamp.fromDate(deadlineDate ?? startDate),
-        maxCapacity,
-        customFormSchema: { fields },
-        bannerUrl: url,
-      };
+      const resolvedClub = profile.role === "coordinator" ? profile.club : club || null;
 
       if (id) {
-        await updateDoc(doc(db, "events", id), data);
+        // Edits never touch ownership, the live registration counter or the
+        // review status — a coordinator can't self-approve by editing.
+        await updateDoc(doc(db, "events", id), {
+          title: title.trim(),
+          description: description.trim(),
+          venue: venue.trim(),
+          tag,
+          club: resolvedClub,
+          eventDate: Timestamp.fromDate(startDate),
+          endDate: endDate ? Timestamp.fromDate(endDate) : null,
+          registrationDeadline: Timestamp.fromDate(deadlineDate ?? startDate),
+          maxCapacity,
+          customFormSchema: { fields },
+          bannerUrl: url,
+        });
         router.push(`/events/${id}`);
       } else {
-        const ref = await addDoc(collection(db, "events"), {
-          ...data,
-          currentRegistrations: 0,
-          createdBy: profile.uid,
-          createdAt: serverTimestamp(),
+        // Goes through the backend so a coordinator's event notifies the
+        // HOD for approval in the same request (an HOD's own event is
+        // auto-approved).
+        const result = await callBackend<{ id: string; status: string }>("messaging/events", {
+          title: title.trim(),
+          description: description.trim(),
+          venue: venue.trim(),
+          tag,
+          club: resolvedClub,
+          eventDate: startDate.toISOString(),
+          endDate: endDate ? endDate.toISOString() : null,
+          registrationDeadline: (deadlineDate ?? startDate).toISOString(),
+          maxCapacity,
+          formFields: fields,
+          bannerUrl: url,
         });
-        router.push(`/events/${ref.id}`);
+        router.push(result.status === "pending" ? "/admin/events" : `/events/${result.id}`);
       }
     } catch (err) {
       setError(friendlyError(err));
@@ -189,9 +202,13 @@ export default function EventBuilder({ id }: { id?: string }) {
         <h3 className="font-bold text-text-primary">Banner (optional)</h3>
         {(banner || bannerUrl) && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={banner ? URL.createObjectURL(banner) : bannerUrl!} alt="Banner preview" className="aspect-video w-full rounded-lg object-cover" />
+          <img
+            src={banner ? URL.createObjectURL(banner) : bannerUrl!}
+            alt="Banner preview"
+            className="h-80 w-full rounded-lg bg-primary-container object-contain"
+          />
         )}
-        <input type="file" accept="image/*" aria-label="Banner image" onChange={(e) => setBanner(e.target.files?.[0] ?? null)} />
+        <input type="file" accept="image/*" aria-label="Banner image — any size works, portrait posters are fine" onChange={(e) => setBanner(e.target.files?.[0] ?? null)} />
       </section>
 
       <section className="card flex flex-col gap-3 p-4">

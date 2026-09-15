@@ -85,9 +85,10 @@ class _EventsHubScreenState extends ConsumerState<EventsHubScreen> {
       }
 
       final now = Timestamp.now();
+      final approved = EventDoc.collection.where('status', isEqualTo: 'approved');
       var query = _segment == 0
-          ? EventDoc.collection.where('eventDate', isGreaterThanOrEqualTo: now).orderBy('eventDate')
-          : EventDoc.collection.where('eventDate', isLessThan: now).orderBy('eventDate', descending: true);
+          ? approved.where('eventDate', isGreaterThanOrEqualTo: now).orderBy('eventDate')
+          : approved.where('eventDate', isLessThan: now).orderBy('eventDate', descending: true);
       query = query.limit(_pageSize);
       if (pageKey != null) query = query.startAfterDocument(pageKey);
 
@@ -288,9 +289,8 @@ class _EventCard extends StatelessWidget {
           children: [
             ClipRRect(
               borderRadius: const BorderRadius.vertical(top: Radius.circular(AppRadius.lg)),
-              child: SizedBox(
-                height: 140,
-                width: double.infinity,
+              child: AspectRatio(
+                aspectRatio: 3 / 4,
                 child: Stack(
                   fit: StackFit.expand,
                   children: [

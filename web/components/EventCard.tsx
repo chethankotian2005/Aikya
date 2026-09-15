@@ -13,7 +13,7 @@ export function EventCard({ event, registered = false }: { event: EventItem; reg
 
   return (
     <Link href={`/events/${event.id}`} className="card block overflow-hidden transition hover:border-accent/50">
-      <div className="relative h-36 w-full">
+      <div className="relative aspect-[3/4] w-full">
         <BannerImage url={event.bannerUrl} alt={event.title} className="h-full w-full" />
         <div className="absolute top-2.5 left-2.5 flex min-w-[40px] flex-col items-center rounded-md bg-surface-elevated px-2 py-1 shadow-sm">
           <span className="text-base leading-tight font-extrabold text-text-primary">{event.eventDate.getDate()}</span>
@@ -55,7 +55,7 @@ export function EventMiniCard({ event }: { event: EventItem }) {
   const full = eventIsFull(event);
   return (
     <Link href={`/events/${event.id}`} className="card flex w-[260px] shrink-0 flex-col overflow-hidden transition hover:border-accent/50">
-      <div className="relative h-[120px] w-full">
+      <div className="relative h-[320px] w-full">
         <BannerImage url={event.bannerUrl} alt={event.title} className="h-full w-full" />
         <div className="absolute top-2 left-2 flex min-w-[36px] flex-col items-center rounded-md bg-surface-elevated px-2 py-1 shadow-sm">
           <span className="text-base leading-tight font-extrabold text-text-primary">{event.eventDate.getDate()}</span>
