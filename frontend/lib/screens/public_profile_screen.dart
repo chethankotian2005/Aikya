@@ -81,7 +81,12 @@ class PublicProfileScreen extends ConsumerWidget {
 
     return Column(
       children: [
-        ProfileAvatar(avatarId: user.avatarId, initials: user.initials, size: 100),
+        ProfileAvatar(
+          avatarId: user.avatarId,
+          profilePictureUrl: user.profilePictureUrl,
+          initials: user.initials,
+          size: 100,
+        ),
         const SizedBox(height: 16),
         Text(user.fullName, style: GoogleFonts.poppins(fontSize: 22, fontWeight: FontWeight.w700)),
         const SizedBox(height: 4),

@@ -174,7 +174,12 @@ class _MemberTile extends ConsumerWidget {
           margin: const EdgeInsets.only(bottom: 8),
           child: ListTile(
             onTap: () => context.push('/directory/profile/$uid'),
-            leading: ProfileAvatar(avatarId: member.avatarId, initials: member.initials, size: 40),
+            leading: ProfileAvatar(
+              avatarId: member.avatarId,
+              profilePictureUrl: member.profilePictureUrl,
+              initials: member.initials,
+              size: 40,
+            ),
             title: Text(member.fullName, style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
             subtitle: Text(isOwner ? 'Owner' : 'Contributor'),
             trailing: const Icon(Icons.chevron_right_rounded),

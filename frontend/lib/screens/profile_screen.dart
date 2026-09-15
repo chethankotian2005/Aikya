@@ -155,7 +155,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           padding: const EdgeInsets.all(20),
           child: Row(
             children: [
-              ProfileAvatar(avatarId: user.avatarId, initials: user.initials, size: 72),
+              ProfileAvatar(
+                avatarId: user.avatarId,
+                profilePictureUrl: user.profilePictureUrl,
+                initials: user.initials,
+                size: 72,
+              ),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(

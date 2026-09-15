@@ -47,17 +47,45 @@ class AvatarPicker extends StatelessWidget {
   }
 }
 
-/// Renders a user's chosen avatar, falling back to initials when none is set.
+/// Renders a user's chosen avatar or uploaded photo, falling back to
+/// initials when neither is set. `avatarId` and `profilePictureUrl` are
+/// mutually exclusive (the backend clears whichever wasn't chosen), so
+/// either may be checked first — but both must be checked.
 class ProfileAvatar extends StatelessWidget {
   final int? avatarId;
+  final String? profilePictureUrl;
   final String initials;
   final double size;
 
-  const ProfileAvatar({super.key, required this.avatarId, required this.initials, this.size = 44});
+  const ProfileAvatar({
+    super.key,
+    required this.avatarId,
+    this.profilePictureUrl,
+    required this.initials,
+    this.size = 44,
+  });
 
   @override
   Widget build(BuildContext context) {
     final avatar = avatarById(avatarId);
+    final photoUrl = profilePictureUrl;
+
+    if (avatar == null && photoUrl != null && photoUrl.isNotEmpty) {
+      return ClipOval(
+        child: Image.network(
+          photoUrl,
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) => _fallback(avatar),
+        ),
+      );
+    }
+
+    return _fallback(avatar);
+  }
+
+  Widget _fallback(AvatarOption? avatar) {
     return Container(
       width: size,
       height: size,

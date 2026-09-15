@@ -135,7 +135,12 @@ class _StudentDirectoryScreenState extends ConsumerState<StudentDirectoryScreen>
         ),
         child: Row(
           children: [
-            ProfileAvatar(avatarId: user.avatarId, initials: initials, size: 50),
+            ProfileAvatar(
+              avatarId: user.avatarId,
+              profilePictureUrl: user.profilePictureUrl,
+              initials: initials,
+              size: 50,
+            ),
             const SizedBox(width: 16),
             Expanded(
               child: Column(

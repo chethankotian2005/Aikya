@@ -37,7 +37,10 @@ final homeStatsProvider = FutureProvider.autoDispose<HomeStats>((ref) async {
 
   final counts = await Future.wait([
     count(db.collection('projects')),
-    count(db.collection('events').where('eventDate', isGreaterThanOrEqualTo: Timestamp.now())),
+    count(db
+        .collection('events')
+        .where('status', isEqualTo: 'approved')
+        .where('eventDate', isGreaterThanOrEqualTo: Timestamp.now())),
     count(db.collection('users').where('role', isEqualTo: UserRole.student.firestoreValue)),
     count(db.collection('alumniProfiles')),
   ]);
@@ -52,6 +55,7 @@ final homeStatsProvider = FutureProvider.autoDispose<HomeStats>((ref) async {
 
 final upcomingEventsProvider = StreamProvider.autoDispose<List<EventDoc>>((ref) {
   return EventDoc.collection
+      .where('status', isEqualTo: 'approved')
       .where('eventDate', isGreaterThanOrEqualTo: Timestamp.now())
       .orderBy('eventDate')
       .limit(6)
@@ -132,7 +136,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         children: [
           GestureDetector(
             onTap: () => context.push('/profile'),
-            child: ProfileAvatar(avatarId: user?.avatarId, initials: user?.initials ?? '', size: 44),
+            child: ProfileAvatar(
+              avatarId: user?.avatarId,
+              profilePictureUrl: user?.profilePictureUrl,
+              initials: user?.initials ?? '',
+              size: 44,
+            ),
           ),
           const SizedBox(width: AppSpacing.md),
           Expanded(
@@ -321,7 +330,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             SizedBox(
-              height: 120,
+              height: 320,
               width: double.infinity,
               child: Stack(
                 fit: StackFit.expand,
