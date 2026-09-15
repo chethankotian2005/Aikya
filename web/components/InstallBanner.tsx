@@ -3,61 +3,42 @@
 import { useEffect, useState } from "react";
 import { Download, X } from "lucide-react";
 
+// Overwritten on every successful push to main by .github/workflows/build-apk.yml —
+// always resolves to the current build, no GitHub auth required (public repo).
+const APK_URL = "https://github.com/chethankotian2005/Aikya/releases/download/apk-latest/aikya.apk";
+
+type Platform = "android" | "ios" | "other";
+
+function detectPlatform(): Platform {
+  const ua = window.navigator.userAgent.toLowerCase();
+  if (/android/.test(ua)) return "android";
+  if (/iphone|ipad|ipod/.test(ua)) return "ios";
+  return "other";
+}
+
+/** Prompts mobile visitors to get the real Aikya Android app instead of the web build. */
 export function InstallBanner() {
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [platform, setPlatform] = useState<Platform | null>(null);
   const [showBanner, setShowBanner] = useState(false);
-  const [isIOS, setIsIOS] = useState(false);
 
   useEffect(() => {
-    // Check if already in standalone mode or dismissed in this session
     const isStandalone = window.matchMedia("(display-mode: standalone)").matches;
     const dismissed = sessionStorage.getItem("pwa-banner-dismissed");
+    if (isStandalone || dismissed) return;
 
-    if (isStandalone || dismissed) {
-      return;
-    }
-
-    // Check for iOS
-    const userAgent = window.navigator.userAgent.toLowerCase();
-    const isIosDevice = /iphone|ipad|ipod/.test(userAgent);
-    setIsIOS(isIosDevice);
-
-    const handleBeforeInstallPrompt = (e: Event) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
-      setShowBanner(true);
-    };
-
-    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-
-    // If iOS, we show the fallback instruction banner immediately since there's no event
-    if (isIosDevice) {
-      setShowBanner(true);
-    }
-
-    return () => {
-      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-    };
+    const detected = detectPlatform();
+    setPlatform(detected);
+    // Only Android gets a real app to download; iOS gets home-screen instructions.
+    // Desktop visitors aren't prompted to install a phone app.
+    setShowBanner(detected === "android" || detected === "ios");
   }, []);
-
-  const handleInstallClick = async () => {
-    if (!deferredPrompt) return;
-
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    
-    if (outcome === "accepted") {
-      setShowBanner(false);
-      setDeferredPrompt(null);
-    }
-  };
 
   const handleDismiss = () => {
     sessionStorage.setItem("pwa-banner-dismissed", "true");
     setShowBanner(false);
   };
 
-  if (!showBanner) return null;
+  if (!showBanner || !platform) return null;
 
   return (
     <div className="bg-primary text-on-primary p-4 flex items-center justify-between shadow-md">
@@ -68,20 +49,18 @@ export function InstallBanner() {
         <div>
           <p className="font-semibold text-sm">Install Aikya</p>
           <p className="text-xs text-on-primary/70">
-            {isIOS 
-              ? "Tap Share → Add to Home Screen" 
-              : "Get the app for a better experience"}
+            {platform === "ios" ? "Tap Share → Add to Home Screen" : "Get the Android app"}
           </p>
         </div>
       </div>
       <div className="flex items-center gap-2">
-        {!isIOS && (
-          <button
-            onClick={handleInstallClick}
+        {platform === "android" && (
+          <a
+            href={APK_URL}
             className="bg-accent hover:bg-accent-hover text-on-primary text-sm font-medium px-4 py-1.5 rounded-full transition-colors"
           >
             Install
-          </button>
+          </a>
         )}
         <button
           onClick={handleDismiss}
