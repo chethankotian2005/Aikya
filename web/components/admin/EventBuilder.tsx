@@ -41,6 +41,7 @@ export default function EventBuilder({ id }: { id?: string }) {
   const [deadline, setDeadline] = useState("");
   const [capacity, setCapacity] = useState("50");
   const [fields, setFields] = useState<RegistrationField[]>(DEFAULT_FIELDS);
+  const [targetYears, setTargetYears] = useState<string[]>([]);
   const [banner, setBanner] = useState<File | null>(null);
   const [bannerUrl, setBannerUrl] = useState<string | null>(null);
   const [registered, setRegistered] = useState(0);
@@ -63,6 +64,7 @@ export default function EventBuilder({ id }: { id?: string }) {
         setDeadline(toLocalInput(e.registrationDeadline));
         setCapacity(String(e.maxCapacity));
         setFields(e.formFields);
+        setTargetYears(e.targetYears);
         setBannerUrl(e.bannerUrl);
         setRegistered(e.currentRegistrations);
       })
@@ -112,6 +114,7 @@ export default function EventBuilder({ id }: { id?: string }) {
           maxCapacity,
           customFormSchema: { fields },
           bannerUrl: url,
+          targetYears,
         });
         router.push(`/events/${id}`);
       } else {
@@ -130,6 +133,7 @@ export default function EventBuilder({ id }: { id?: string }) {
           maxCapacity,
           formFields: fields,
           bannerUrl: url,
+          targetYears,
         });
         router.push(result.status === "pending" ? "/admin/events" : `/events/${result.id}`);
       }
@@ -195,6 +199,30 @@ export default function EventBuilder({ id }: { id?: string }) {
         <div>
           <label htmlFor="ev-cap" className="label">Seat capacity</label>
           <input id="ev-cap" type="number" min={Math.max(1, registered)} className="input" value={capacity} onChange={(e) => setCapacity(e.target.value)} required />
+        </div>
+      </section>
+
+      <section className="card flex flex-col gap-3 p-4">
+        <h3 className="font-bold text-text-primary">Who is this for?</h3>
+        <p className="text-xs text-text-secondary">Leave everything unselected for an event open to all years.</p>
+        <div className="flex flex-wrap gap-2">
+          {([["1", "1st Year"], ["2", "2nd Year"], ["3", "3rd Year"], ["4", "Final Year"]] as const).map(([value, label]) => {
+            const selected = targetYears.includes(value);
+            return (
+              <button
+                key={value}
+                type="button"
+                onClick={() =>
+                  setTargetYears((ys) => (selected ? ys.filter((y) => y !== value) : [...ys, value]))
+                }
+                className={`rounded-full px-4 py-1.5 text-sm font-medium transition ${
+                  selected ? "bg-secondary text-white" : "bg-primary-container text-text-secondary"
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
         </div>
       </section>
 

@@ -142,6 +142,12 @@ export interface EventItem {
   /** 'pending' (coordinator-created, awaiting HOD review), 'approved', or 'rejected'. */
   status: string | null;
   reviewNotes: string | null;
+  /** Years of study this event is restricted to (e.g. ["3","4"]). Empty = open to everyone. */
+  targetYears: string[];
+}
+
+export function eventOpenToYear(event: EventItem, studentYear: string | null): boolean {
+  return event.targetYears.length === 0 || (studentYear != null && event.targetYears.includes(studentYear));
 }
 
 export function toEvent(id: string, d: Record<string, unknown>): EventItem {
@@ -169,6 +175,7 @@ export function toEvent(id: string, d: Record<string, unknown>): EventItem {
     sentiment: sentiment ?? null,
     status: optStr(d.status),
     reviewNotes: optStr(d.reviewNotes),
+    targetYears: strList(d.targetYears),
   };
 }
 

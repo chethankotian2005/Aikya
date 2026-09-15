@@ -41,6 +41,7 @@ class _EventCreationScreenState extends ConsumerState<EventCreationScreen> {
   DateTime? _start;
   DateTime? _end;
   DateTime? _deadline;
+  Set<String> _targetYears = {}; // empty = open to every year
   List<RegistrationField> _fields = const [
     RegistrationField(label: 'Full Name'),
     RegistrationField(label: 'Phone', type: FieldType.phone),
@@ -90,6 +91,7 @@ class _EventCreationScreenState extends ConsumerState<EventCreationScreen> {
         _fields = event.formFields;
         _existingBannerUrl = event.bannerUrl;
         _currentRegistrations = event.currentRegistrations;
+        _targetYears = event.targetYears.toSet();
       });
     } catch (e) {
       if (mounted) {
@@ -172,6 +174,7 @@ class _EventCreationScreenState extends ConsumerState<EventCreationScreen> {
           club: club,
           bannerUrl: bannerUrl,
           createdBy: user.uid,
+          targetYears: _targetYears.toList(),
         )
           ..remove('createdBy')
           ..remove('currentRegistrations')
@@ -194,6 +197,7 @@ class _EventCreationScreenState extends ConsumerState<EventCreationScreen> {
           'tag': _tag,
           'club': club,
           'bannerUrl': bannerUrl,
+          'targetYears': _targetYears.toList(),
         });
         successMessage =
             result['status'] == 'pending' ? 'Submitted — the HOD will review it shortly' : 'Event published';
@@ -289,6 +293,36 @@ class _EventCreationScreenState extends ConsumerState<EventCreationScreen> {
                       if (n < _currentRegistrations) return '$_currentRegistrations students already registered';
                       return null;
                     },
+                  ),
+                  const SizedBox(height: 24),
+                  _section('Who is this for?'),
+                  Text(
+                    'Leave everything unselected for an event open to all years.',
+                    style: GoogleFonts.poppins(fontSize: 12, color: AppColors.textSecondary),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final entry in const {
+                        '1': '1st Year',
+                        '2': '2nd Year',
+                        '3': '3rd Year',
+                        '4': 'Final Year',
+                      }.entries)
+                        FilterChip(
+                          label: Text(entry.value),
+                          selected: _targetYears.contains(entry.key),
+                          onSelected: (selected) => setState(() {
+                            if (selected) {
+                              _targetYears.add(entry.key);
+                            } else {
+                              _targetYears.remove(entry.key);
+                            }
+                          }),
+                        ),
+                    ],
                   ),
                   const SizedBox(height: 24),
                   _section('Banner (optional)'),

@@ -9,7 +9,7 @@ import { db } from "@/lib/firebase/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { friendlyError } from "@/lib/errors";
 import { useLiveQuery } from "@/lib/hooks";
-import { toEvent, type EventItem } from "@/lib/models";
+import { eventOpenToYear, toEvent, type EventItem } from "@/lib/models";
 import { EmptyState, PageHeader, PageSpinner } from "@/components/ui";
 import { EventCard } from "@/components/EventCard";
 
@@ -58,7 +58,14 @@ export default function EventsHub() {
   }, [profile, isStudent]);
 
   const registeredIds = useMemo(() => new Set(mine.events.map((e) => e.id)), [mine.events]);
-  const source = segment === "mine" ? mine.events : events.data;
+  // "Mine" is the student's own registrations — those stay visible even if
+  // a later year-restriction change would otherwise hide the event.
+  const source =
+    segment === "mine"
+      ? mine.events
+      : isStudent
+        ? events.data.filter((e) => eventOpenToYear(e, profile?.yearOfStudy ?? null))
+        : events.data;
   const loading = segment === "mine" ? mine.loading : events.loading;
   const error = segment === "mine" ? mine.error : events.error;
 

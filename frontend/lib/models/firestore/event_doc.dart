@@ -32,6 +32,10 @@ class EventDoc {
   final String? status;
   final String? reviewNotes;
 
+  /// Years of study this event is restricted to (e.g. ['3','4'] for a
+  /// senior-only workshop). Empty = open to every year.
+  final List<String> targetYears;
+
   const EventDoc({
     required this.id,
     required this.title,
@@ -52,7 +56,11 @@ class EventDoc {
     this.sentimentPercentages,
     this.status,
     this.reviewNotes,
+    this.targetYears = const [],
   });
+
+  bool isOpenToYear(String? studentYear) =>
+      targetYears.isEmpty || (studentYear != null && targetYears.contains(studentYear));
 
   bool get isPending => status == 'pending';
   bool get isRejected => status == 'rejected';
@@ -94,6 +102,7 @@ class EventDoc {
           : null,
       status: data['status'] as String?,
       reviewNotes: data['reviewNotes'] as String?,
+      targetYears: (data['targetYears'] as List?)?.map((y) => y.toString()).toList() ?? const [],
     );
   }
 
@@ -114,6 +123,7 @@ class EventDoc {
     String? club,
     String? bannerUrl,
     required String createdBy,
+    List<String> targetYears = const [],
   }) {
     return {
       'title': title,
@@ -130,6 +140,7 @@ class EventDoc {
       'bannerUrl': bannerUrl,
       'createdBy': createdBy,
       'createdAt': FieldValue.serverTimestamp(),
+      'targetYears': targetYears,
     };
   }
 

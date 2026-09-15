@@ -288,13 +288,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   // ─── Upcoming events ────────────────────────────────────────────────
   Widget _buildEventCarousel() {
     final events = ref.watch(upcomingEventsProvider);
+    final user = ref.read(currentUserDocProvider).valueOrNull;
 
     return SizedBox(
       height: 230,
       child: events.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => _emptyCard(Icons.error_outline, friendlyError(e)),
-        data: (list) => list.isEmpty
+        data: (rawList) {
+          final list = user?.role == UserRole.student
+              ? rawList.where((e) => e.isOpenToYear(user?.yearOfStudy)).toList()
+              : rawList;
+          return list.isEmpty
             ? _emptyCard(Icons.event_busy_rounded, 'No upcoming events yet.')
             : ListView.separated(
                 scrollDirection: Axis.horizontal,
@@ -302,7 +307,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 itemCount: list.length,
                 separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.md),
                 itemBuilder: (_, i) => _eventCard(list[i]),
-              ),
+              );
+        },
       ),
     );
   }

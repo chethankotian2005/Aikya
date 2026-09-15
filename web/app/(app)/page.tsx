@@ -12,7 +12,7 @@ import {
 import { db } from "@/lib/firebase/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { useLiveQuery } from "@/lib/hooks";
-import { ROLE_LABELS, canBuildEvents, formatDate, isStaff, timeAgo, toEvent, toUpdate } from "@/lib/models";
+import { ROLE_LABELS, canBuildEvents, eventOpenToYear, formatDate, isStaff, timeAgo, toEvent, toUpdate } from "@/lib/models";
 import { Avatar, EmptyState, PageSpinner, TagChip } from "@/components/ui";
 import { EventMiniCard } from "@/components/EventCard";
 
@@ -120,19 +120,25 @@ export default function Home() {
           View all
         </Link>
       </div>
-      {events.loading ? (
-        <PageSpinner />
-      ) : events.data.length === 0 ? (
-        <EmptyState icon={Calendar} message={events.error || "No upcoming events yet."} />
-      ) : (
-        <div className="no-scrollbar w-full overflow-x-auto pb-2">
-          <div className="flex min-w-max gap-4 px-5">
-            {events.data.map((e) => (
-              <EventMiniCard key={e.id} event={e} />
-            ))}
+      {(() => {
+        const visibleEvents =
+          profile.role === "student"
+            ? events.data.filter((e) => eventOpenToYear(e, profile.yearOfStudy))
+            : events.data;
+        return events.loading ? (
+          <PageSpinner />
+        ) : visibleEvents.length === 0 ? (
+          <EmptyState icon={Calendar} message={events.error || "No upcoming events yet."} />
+        ) : (
+          <div className="no-scrollbar w-full overflow-x-auto pb-2">
+            <div className="flex min-w-max gap-4 px-5">
+              {visibleEvents.map((e) => (
+                <EventMiniCard key={e.id} event={e} />
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       <h2 className="px-5 pt-6 pb-3 text-[15px] font-bold text-text-primary">Department Updates</h2>
       <div className="flex flex-col gap-4 px-5 pb-6">

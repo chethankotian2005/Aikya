@@ -35,6 +35,19 @@ class MessagingService {
         final isStudent = user.role == UserRole.student;
         await _fcm.subscribeToTopic(isStudent ? 'all_students' : 'all_faculty');
         await _fcm.unsubscribeFromTopic(isStudent ? 'all_faculty' : 'all_students');
+
+        // Year-restricted events notify only their target years — resync to
+        // whichever single year topic actually matches right now (covers a
+        // student moving up a year between academic sessions).
+        for (final year in const ['1', '2', '3', '4']) {
+          final topic = 'year_$year';
+          if (isStudent && user.yearOfStudy == year) {
+            await _fcm.subscribeToTopic(topic);
+          } else {
+            await _fcm.unsubscribeFromTopic(topic);
+          }
+        }
+
         await _initForegroundNotifications();
       }
     } catch (e) {

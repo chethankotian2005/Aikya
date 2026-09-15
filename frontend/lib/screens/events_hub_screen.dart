@@ -109,14 +109,21 @@ class _EventsHubScreenState extends ConsumerState<EventsHubScreen> {
   }
 
   List<EventDoc> _filter(List<EventDoc> events) {
-    if (_query.isEmpty) return events;
-    final q = _query.toLowerCase();
-    return events
-        .where((e) =>
-            e.title.toLowerCase().contains(q) ||
-            e.tag.toLowerCase().contains(q) ||
-            e.venue.toLowerCase().contains(q))
-        .toList();
+    final user = ref.read(currentUserDocProvider).valueOrNull;
+    var visible = user?.role == UserRole.student
+        ? events.where((e) => e.isOpenToYear(user?.yearOfStudy)).toList()
+        : events;
+
+    if (_query.isNotEmpty) {
+      final q = _query.toLowerCase();
+      visible = visible
+          .where((e) =>
+              e.title.toLowerCase().contains(q) ||
+              e.tag.toLowerCase().contains(q) ||
+              e.venue.toLowerCase().contains(q))
+          .toList();
+    }
+    return visible;
   }
 
   void _setSegment(int index) {
