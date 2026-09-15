@@ -20,6 +20,7 @@ import profileRoutes from './routes/profileRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import messagingRoutes from './routes/messagingRoutes.js';
 import uploadRoutes from './routes/uploadRoutes.js';
+import attendanceRoutes from './routes/attendanceRoutes.js';
 
 // ── Firebase Admin Init ─────────────────────────────────────────────
 
@@ -84,6 +85,7 @@ app.use('/api', accreditationCompilerRouter);
 app.use('/api', sentimentRollupRouter);
 app.use('/api', profileRoutes);
 app.use('/api', uploadRoutes);
+app.use('/api', attendanceRoutes);
 
 // Admin routes
 app.use('/api/admin', adminRoutes);

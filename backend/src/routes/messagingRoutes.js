@@ -135,7 +135,7 @@ router.post(
     try {
       const {
         title, description, venue, eventDate, endDate, maxCapacity,
-        registrationDeadline, formFields, tag, club, bannerUrl, targetYears,
+        registrationDeadline, formFields, tag, club, bannerUrl, targetYears, fullDayEvent,
       } = req.body;
 
       if (typeof title !== 'string' || title.trim().length < 3 || title.length > 120) {
@@ -145,6 +145,7 @@ router.post(
       const cleanTargetYears = Array.isArray(targetYears)
         ? [...new Set(targetYears.filter((y) => VALID_YEARS.includes(String(y))))]
         : [];
+      const sessions = fullDayEvent === true ? ['morning', 'afternoon'] : ['full'];
       if (typeof description !== 'string' || !description.trim()) {
         return res.status(400).json({ error: 'Description is required.' });
       }
@@ -188,6 +189,7 @@ router.post(
         // Empty = open to every year. Non-empty = only these years can see
         // or register for it, and only these years get notified it's live.
         targetYears: cleanTargetYears,
+        sessions,
         status,
         createdBy: req.uid,
         createdAt: FieldValue.serverTimestamp(),

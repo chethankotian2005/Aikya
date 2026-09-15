@@ -188,11 +188,26 @@ service cloud.firestore {
         // Sentiment fields are written by the backend (Admin SDK) only.
         allow update: if false;
       }
+
+      // ─── ATTENDANCE (QR scan records) ──────────────────────────────
+      // Written only through POST /api/attendance/scan (Admin SDK) so a
+      // scan is always validated server-side — never a direct client write.
+
+      match /attendance/{recordId} {
+        allow read: if signedIn()
+          && (resource.data.studentUid == request.auth.uid || isHod() || isCreator(get(eventPath(eventId)).data));
+        allow write: if false;
+      }
     }
 
     // "My registrations" is a collection-group query on studentUid.
     match /{path=**}/registrations/{studentUid} {
       allow read: if signedIn();
+    }
+
+    // "My attendance" is a collection-group query on studentUid.
+    match /{path=**}/attendance/{recordId} {
+      allow read: if signedIn() && resource.data.studentUid == request.auth.uid;
     }
 
     // ═══════════════════════════════════════════════════════════════════
