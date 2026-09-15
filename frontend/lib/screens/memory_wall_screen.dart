@@ -283,7 +283,7 @@ class _UploadSheetState extends ConsumerState<_UploadSheet> {
 
     setState(() => _uploading = true);
     try {
-      final url = await uploadImage(image, 'memoryFrames/${user.uid}/${uniqueImageName(image)}');
+      final url = await uploadImage(image, UploadFolder.memoryFrame);
       await MemoryFrameDoc.collection.add(MemoryFrameDoc.newFrame(
         uploadedBy: user.uid,
         uploaderName: user.fullName,

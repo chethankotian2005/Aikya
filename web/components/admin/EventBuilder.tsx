@@ -8,7 +8,7 @@ import { db } from "@/lib/firebase/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { friendlyError } from "@/lib/errors";
 import { CLUBS, toEvent, type FieldType, type RegistrationField } from "@/lib/models";
-import { uniqueFileName, uploadImage } from "@/lib/upload";
+import { uploadImage } from "@/lib/upload";
 import { ErrorText, PageSpinner } from "@/components/ui";
 
 const TAGS = ["Workshop", "Hackathon", "Seminar", "Talk", "Competition", "Cultural", "General"];
@@ -93,7 +93,7 @@ export default function EventBuilder({ id }: { id?: string }) {
 
     setSaving(true);
     try {
-      const url = banner ? await uploadImage(banner, `events/${profile.uid}/${uniqueFileName(banner)}`) : bannerUrl;
+      const url = banner ? await uploadImage(banner, "event_banners") : bannerUrl;
       const data = {
         title: title.trim(),
         description: description.trim(),

@@ -6,7 +6,8 @@ import { callBackend } from "@/lib/api";
 import { logout, useAuth } from "@/lib/auth-context";
 import { friendlyError } from "@/lib/errors";
 import { detectYear } from "@/lib/models";
-import AvatarPicker from "@/components/AvatarPicker";
+import ProfilePictureField, { type PictureMode } from "@/components/ProfilePictureField";
+import { uploadImage } from "@/lib/upload";
 import { ErrorText, PageSpinner } from "@/components/ui";
 
 const STEPS = ["Identity", "Academic info", "Socials", "Avatar"];
@@ -19,6 +20,8 @@ export default function SetupForm() {
   const [flag, setFlag] = useState(false);
   const [socials, setSocials] = useState({ githubUrl: "", linkedinUrl: "", instagramHandle: "", personalWebsite: "" });
   const [avatarId, setAvatarId] = useState<number | null>(null);
+  const [pictureMode, setPictureMode] = useState<PictureMode>("avatar");
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [prefilled, setPrefilled] = useState(false);
@@ -44,9 +47,11 @@ export default function SetupForm() {
 
   const complete = async () => {
     setError("");
+    if (pictureMode === "photo" && !photoFile) return setError("Please choose a photo or switch to Avatar.");
     setSaving(true);
     try {
       const clean = (v: string) => v.trim() || null;
+      const photoUrl = pictureMode === "photo" && photoFile ? await uploadImage(photoFile, "profile_pictures") : null;
       await callBackend(
         "profile",
         {
@@ -57,7 +62,8 @@ export default function SetupForm() {
           linkedinUrl: clean(socials.linkedinUrl),
           instagramHandle: clean(socials.instagramHandle),
           personalWebsite: clean(socials.personalWebsite),
-          avatarId,
+          avatarId: pictureMode === "avatar" ? avatarId : null,
+          profilePictureUrl: pictureMode === "photo" ? photoUrl : null,
           flagForHodReview: flag,
         },
         "PUT",
@@ -143,8 +149,16 @@ export default function SetupForm() {
 
         {step === 3 && (
           <div className="flex flex-col items-center gap-4">
-            <p className="text-sm text-text-secondary">Pick an avatar to represent you.</p>
-            <AvatarPicker value={avatarId} onChange={setAvatarId} />
+            <p className="text-sm text-text-secondary">Pick an avatar or upload your own photo.</p>
+            <ProfilePictureField
+              mode={pictureMode}
+              onModeChange={setPictureMode}
+              avatarId={avatarId}
+              onAvatarChange={setAvatarId}
+              photoFile={photoFile}
+              onPhotoFileChange={setPhotoFile}
+              existingPhotoUrl={null}
+            />
           </div>
         )}
 

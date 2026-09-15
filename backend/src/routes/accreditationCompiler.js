@@ -17,10 +17,10 @@
 
 import { Router } from 'express';
 import admin from 'firebase-admin';
-import { getDownloadURL } from 'firebase-admin/storage';
 import PDFDocument from 'pdfkit';
 import { verifyAuth, requireRole } from '../middleware/verifyAuth.js';
 import { geminiLimiter, geminiModel } from '../utils/gemini.js';
+import { uploadRawToCloudinary } from '../utils/cloudinary.js';
 
 const router = Router();
 let _db;
@@ -190,23 +190,9 @@ Generate a complete, structured Markdown accreditation document.`;
 
       const pdfBuffer = await renderPdf(`Accreditation Report — ${label}`, markdown);
 
-      const bucket = admin.storage().bucket();
-      const fileName = `accreditation-reports/${label.replace(/[^A-Za-z0-9_-]+/g, '_')}_${Date.now()}.pdf`;
-      const file = bucket.file(fileName);
-
-      await file.save(pdfBuffer, {
-        metadata: {
-          contentType: 'application/pdf',
-          metadata: {
-            compiledBy: req.uid,
-            semesterLabel: label,
-            eventCount: String(events.length),
-          },
-        },
-      });
-
-      // Tokenised Firebase download URL — not a world-listable public object.
-      const pdfUrl = await getDownloadURL(file);
+      const publicId = `${label.replace(/[^A-Za-z0-9_-]+/g, '_')}_${Date.now()}`;
+      const uploaded = await uploadRawToCloudinary(pdfBuffer, { folder: 'aikya/accreditation-reports', publicId });
+      const pdfUrl = uploaded.secure_url;
 
       const reportRef = db().collection('accreditationReports').doc();
       await reportRef.set({
@@ -214,7 +200,6 @@ Generate a complete, structured Markdown accreditation document.`;
         compiledBy: req.uid,
         includedEventIds: events.map((e) => e.id),
         pdfUrl,
-        storagePath: fileName,
         generatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 

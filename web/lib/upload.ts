@@ -1,18 +1,39 @@
 "use client";
 
-import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
-import { storage } from "@/lib/firebase/firebase";
+import { auth } from "@/lib/firebase/firebase";
+import { ApiError } from "@/lib/api";
 
-/** Uploads an image with its content type (storage.rules require image/*) and returns its URL. */
-export async function uploadImage(file: File, path: string, maxMb = 10): Promise<string> {
+export type UploadFolder = "profile_pictures" | "event_banners" | "memory_frame" | "project_images";
+
+/**
+ * Uploads an image through the authenticated backend (which forwards it to
+ * Cloudinary — Firebase Storage now requires the Blaze plan) and returns its
+ * secure URL.
+ */
+export async function uploadImage(file: File, folder: UploadFolder, maxMb = 10): Promise<string> {
   if (!file.type.startsWith("image/")) throw new Error("Please choose an image file.");
   if (file.size > maxMb * 1024 * 1024) throw new Error(`Images must be under ${maxMb} MB.`);
 
-  const fileRef = ref(storage, path);
-  await uploadBytes(fileRef, file, { contentType: file.type });
-  return getDownloadURL(fileRef);
-}
+  const user = auth.currentUser;
+  if (!user) throw new ApiError(401, "Please sign in again.");
+  const token = await user.getIdToken();
 
-export function uniqueFileName(file: File): string {
-  return `${Date.now()}_${file.name.replace(/[^A-Za-z0-9._-]/g, "_")}`;
+  const form = new FormData();
+  form.append("folder", folder);
+  form.append("file", file);
+
+  let res: Response;
+  try {
+    res = await fetch("/api/backend/upload-image", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    });
+  } catch {
+    throw new ApiError(0, "Could not reach the AIKYA server. Check your connection and try again.");
+  }
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(res.status, data.error || `Upload failed (${res.status}).`);
+  return data.secure_url as string;
 }

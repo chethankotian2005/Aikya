@@ -12,6 +12,7 @@ const ALLOWED_PATHS = new Set([
   "generate-report",
   "compile-accreditation",
   "sentiment-rollup",
+  "upload-image",
   "messaging/updates",
   "messaging/attendance/approve",
   "messaging/attendance/reject",
@@ -35,10 +36,11 @@ async function forward(request: NextRequest, { params }: Context) {
     const response = await fetch(`${BACKEND_URL}/${path}`, {
       method: request.method,
       headers: {
-        "Content-Type": "application/json",
+        "Content-Type": request.headers.get("content-type") ?? "application/json",
         Authorization: request.headers.get("authorization") ?? "",
       },
-      body: await request.text(),
+      // Binary-safe for multipart uploads; request.text() would corrupt them.
+      body: await request.arrayBuffer(),
       signal: AbortSignal.timeout(55_000),
     });
 

@@ -66,9 +66,7 @@ class _ProjectSubmitScreenState extends ConsumerState<ProjectSubmitScreen> {
           .toList();
 
       final image = _image;
-      final imageUrl = image == null
-          ? null
-          : await uploadImage(image, 'projects/${user.uid}/${uniqueImageName(image)}');
+      final imageUrl = image == null ? null : await uploadImage(image, UploadFolder.projectImages);
 
       final repo = _repoController.text.trim();
       final docRef = await ProjectDoc.collection.add(ProjectDoc.newProject(

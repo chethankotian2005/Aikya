@@ -8,7 +8,7 @@ import { useAuth } from "@/lib/auth-context";
 import { friendlyError } from "@/lib/errors";
 import { useLiveQuery } from "@/lib/hooks";
 import { toFrame, type MemoryFrame } from "@/lib/models";
-import { uniqueFileName, uploadImage } from "@/lib/upload";
+import { uploadImage } from "@/lib/upload";
 import { AiBadge, EmptyState, ErrorText, PageHeader, PageSpinner, TagChip } from "@/components/ui";
 import Markdown from "@/components/Markdown";
 
@@ -27,7 +27,7 @@ function UploadDialog({ onClose }: { onClose: () => void }) {
     setSaving(true);
     setError("");
     try {
-      const imageUrl = await uploadImage(file, `memoryFrames/${profile.uid}/${uniqueFileName(file)}`);
+      const imageUrl = await uploadImage(file, "memory_frame");
       await addDoc(collection(db, "memoryFrames"), {
         uploadedBy: profile.uid,
         uploaderName: profile.fullName,

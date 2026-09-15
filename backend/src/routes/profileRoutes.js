@@ -15,7 +15,10 @@ import { verifyAuth } from '../middleware/verifyAuth.js';
 const router = express.Router();
 
 // Must match the 12 entries in each client's avatar catalog (lib/avatars.ts /
-// widgets/avatar_picker.dart) — presets only, no file storage (spec §9).
+// widgets/avatar_picker.dart). A profile shows the avatar when avatarId is
+// set, otherwise falls back to profilePictureUrl (a Cloudinary secure_url
+// from POST /api/upload-image) — the client sends whichever one it cleared
+// as null when the user switches between the two options.
 const AVATAR_COUNT = 12;
 
 const OPTIONAL_STRING_FIELDS = [

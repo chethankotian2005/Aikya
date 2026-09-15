@@ -19,6 +19,7 @@ import sentimentRollupRouter from './routes/sentimentRollup.js';
 import profileRoutes from './routes/profileRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import messagingRoutes from './routes/messagingRoutes.js';
+import uploadRoutes from './routes/uploadRoutes.js';
 
 // ── Firebase Admin Init ─────────────────────────────────────────────
 
@@ -82,6 +83,7 @@ app.use('/api', reportGeneratorRouter);
 app.use('/api', accreditationCompilerRouter);
 app.use('/api', sentimentRollupRouter);
 app.use('/api', profileRoutes);
+app.use('/api', uploadRoutes);
 
 // Admin routes
 app.use('/api/admin', adminRoutes);

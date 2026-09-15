@@ -137,7 +137,7 @@ class _AdminReportGeneratorViewState extends ConsumerState<AdminReportGeneratorV
     try {
       for (var i = 0; i < _photos.length; i++) {
         final photo = _photos[i];
-        final url = await uploadImage(photo.file, 'memoryFrames/${user.uid}/${uniqueImageName(photo.file)}');
+        final url = await uploadImage(photo.file, UploadFolder.memoryFrame);
         await MemoryFrameDoc.collection.add(MemoryFrameDoc.newFrame(
           uploadedBy: user.uid,
           uploaderName: user.fullName,

@@ -1,14 +1,18 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl_phone_field/intl_phone_field.dart';
 
 import '../../../core/theme/app_tokens.dart';
 import '../../../services/firebase_service.dart';
 import '../../../services/render_api_service.dart';
 import '../../../utils/friendly_error.dart';
-import '../../../widgets/avatar_picker.dart';
+import '../../../utils/image_upload.dart';
+import '../../../widgets/profile_picture_field.dart';
 import '../data/user_doc.dart';
 
 class ProfileEditScreen extends ConsumerStatefulWidget {
@@ -24,6 +28,10 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
 
   String? _phoneNumber;
   int? _avatarId;
+  PictureMode _pictureMode = PictureMode.avatar;
+  XFile? _photoFile;
+  Uint8List? _photoPreview;
+  String? _existingPhotoUrl;
   final _bioController = TextEditingController();
   final _skillsController = TextEditingController();
   final _githubController = TextEditingController();
@@ -59,6 +67,8 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
     if (_loaded) return;
     _loaded = true;
     _avatarId = user.avatarId ?? 1;
+    _existingPhotoUrl = user.profilePictureUrl;
+    _pictureMode = (user.profilePictureUrl != null && user.avatarId == null) ? PictureMode.photo : PictureMode.avatar;
     _phoneNumber = user.phone;
     _bioController.text = user.bio ?? '';
     _skillsController.text = user.skills.join(', ');
@@ -75,8 +85,19 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
   String? _text(TextEditingController c) => c.text.trim().isEmpty ? null : c.text.trim();
 
   Future<void> _save(UserDoc user) async {
+    if (_pictureMode == PictureMode.photo && _photoFile == null && _existingPhotoUrl == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please choose a photo or switch to Avatar.')),
+      );
+      return;
+    }
+
     setState(() => _saving = true);
     try {
+      final photoUrl = _pictureMode == PictureMode.photo
+          ? (_photoFile != null ? await uploadImage(_photoFile!, UploadFolder.profilePictures) : _existingPhotoUrl)
+          : null;
+
       await ref.read(renderApiServiceProvider).updateProfile({
         'fullName': user.fullName,
         if (user.usn.isNotEmpty) 'usn': user.usn,
@@ -89,7 +110,8 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
         'personalWebsite': _text(_websiteController),
         'twitterHandle': _text(_twitterController),
         'discordHandle': _text(_discordController),
-        'avatarId': _avatarId,
+        'avatarId': _pictureMode == PictureMode.avatar ? _avatarId : null,
+        'profilePictureUrl': _pictureMode == PictureMode.photo ? photoUrl : null,
         'flagForHodReview': _flagForHodReview,
         'privacySettings': _privacy.toJson(),
         'notificationSettings': _notifications.toJson(),
@@ -125,13 +147,26 @@ class _ProfileEditScreenState extends ConsumerState<ProfileEditScreen> {
           Center(
             child: Column(
               children: [
-                Text('Choose your avatar', style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary)),
+                Text('Pick an avatar or upload your own photo.',
+                    style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textSecondary)),
                 const SizedBox(height: 12),
                 SizedBox(
                   width: 280,
-                  child: AvatarPicker(
-                    value: _avatarId,
-                    onChanged: (id) => setState(() => _avatarId = id),
+                  child: ProfilePictureField(
+                    mode: _pictureMode,
+                    onModeChanged: (m) => setState(() => _pictureMode = m),
+                    avatarId: _avatarId,
+                    onAvatarChanged: (id) => setState(() => _avatarId = id),
+                    photoFile: _photoFile,
+                    photoPreviewBytes: _photoPreview,
+                    onPhotoChanged: (file) async {
+                      final bytes = file == null ? null : await file.readAsBytes();
+                      setState(() {
+                        _photoFile = file;
+                        _photoPreview = bytes;
+                      });
+                    },
+                    existingPhotoUrl: _existingPhotoUrl,
                   ),
                 ),
               ],

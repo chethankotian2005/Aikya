@@ -6,7 +6,8 @@ import { callBackend } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { friendlyError } from "@/lib/errors";
 import { ROLE_LABELS } from "@/lib/models";
-import AvatarPicker from "@/components/AvatarPicker";
+import ProfilePictureField, { type PictureMode } from "@/components/ProfilePictureField";
+import { uploadImage } from "@/lib/upload";
 import { ErrorText, PageHeader, PageSpinner } from "@/components/ui";
 
 const SOCIALS = [
@@ -49,6 +50,9 @@ export default function EditProfilePage() {
   const [notifications, setNotifications] = useState<Record<string, boolean>>({});
   const [flag, setFlag] = useState(false);
   const [avatarId, setAvatarId] = useState<number | null>(null);
+  const [pictureMode, setPictureMode] = useState<PictureMode>("avatar");
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [existingPhotoUrl, setExistingPhotoUrl] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -61,6 +65,8 @@ export default function EditProfilePage() {
     setPrivacy(Object.fromEntries(PRIVACY.map(([k]) => [k, profile.privacySettings[k] !== false])));
     setNotifications(Object.fromEntries(NOTIFICATIONS.map(([k]) => [k, profile.notificationSettings[k] !== false])));
     setAvatarId(profile.avatarId ?? 1);
+    setExistingPhotoUrl(profile.profilePictureUrl);
+    setPictureMode(profile.profilePictureUrl && profile.avatarId == null ? "photo" : "avatar");
     setLoaded(true);
   }, [profile, loaded]);
 
@@ -70,8 +76,12 @@ export default function EditProfilePage() {
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    if (pictureMode === "photo" && !photoFile && !existingPhotoUrl) {
+      return setError("Please choose a photo or switch to Avatar.");
+    }
     setSaving(true);
     try {
+      const photoUrl = pictureMode === "photo" && photoFile ? await uploadImage(photoFile, "profile_pictures") : existingPhotoUrl;
       await callBackend(
         "profile",
         {
@@ -81,7 +91,8 @@ export default function EditProfilePage() {
           bio: bio.trim() || null,
           skills: skills.split(",").map((s) => s.trim()).filter(Boolean),
           ...Object.fromEntries(SOCIALS.map(([k]) => [k, socials[k].trim() || null])),
-          avatarId,
+          avatarId: pictureMode === "avatar" ? avatarId : null,
+          profilePictureUrl: pictureMode === "photo" ? photoUrl : null,
           flagForHodReview: flag,
           privacySettings: privacy,
           notificationSettings: notifications,
@@ -107,8 +118,16 @@ export default function EditProfilePage() {
       <PageHeader title="Edit Profile" back />
       <form onSubmit={save} className="flex flex-col gap-6 px-5 pt-4 pb-10">
         <div className="flex flex-col items-center gap-3">
-          <p className="text-sm text-text-secondary">Choose your avatar</p>
-          <AvatarPicker value={avatarId} onChange={setAvatarId} />
+          <p className="text-sm text-text-secondary">Pick an avatar or upload your own photo.</p>
+          <ProfilePictureField
+            mode={pictureMode}
+            onModeChange={setPictureMode}
+            avatarId={avatarId}
+            onAvatarChange={setAvatarId}
+            photoFile={photoFile}
+            onPhotoFileChange={setPhotoFile}
+            existingPhotoUrl={existingPhotoUrl}
+          />
         </div>
 
         <section className="card p-4">

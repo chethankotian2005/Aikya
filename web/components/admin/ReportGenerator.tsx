@@ -7,7 +7,7 @@ import { db } from "@/lib/firebase/firebase";
 import { callBackend } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { friendlyError } from "@/lib/errors";
-import { uniqueFileName, uploadImage } from "@/lib/upload";
+import { uploadImage } from "@/lib/upload";
 import { AiBadge, ErrorText } from "@/components/ui";
 import Markdown from "@/components/Markdown";
 import { useManageableEvents } from "@/components/admin/useManageableEvents";
@@ -65,7 +65,7 @@ export default function ReportGenerator({ initialEventId }: { initialEventId: st
     setError("");
     try {
       for (const [i, photo] of photos.entries()) {
-        const imageUrl = await uploadImage(photo, `memoryFrames/${profile.uid}/${uniqueFileName(photo)}`);
+        const imageUrl = await uploadImage(photo, "memory_frame");
         await addDoc(collection(db, "memoryFrames"), {
           uploadedBy: profile.uid,
           uploaderName: profile.fullName,

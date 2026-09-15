@@ -7,7 +7,7 @@ import { ImagePlus } from "lucide-react";
 import { db } from "@/lib/firebase/firebase";
 import { useAuth } from "@/lib/auth-context";
 import { friendlyError } from "@/lib/errors";
-import { uniqueFileName, uploadImage } from "@/lib/upload";
+import { uploadImage } from "@/lib/upload";
 import { ErrorText, PageHeader, PageSpinner } from "@/components/ui";
 
 export default function ProjectForm() {
@@ -36,7 +36,7 @@ export default function ProjectForm() {
 
     setSaving(true);
     try {
-      const imageUrl = image ? await uploadImage(image, `projects/${profile.uid}/${uniqueFileName(image)}`) : null;
+      const imageUrl = image ? await uploadImage(image, "project_images") : null;
       const ref = await addDoc(collection(db, "projects"), {
         title: title.trim(),
         description: description.trim(),

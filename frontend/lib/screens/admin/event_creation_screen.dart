@@ -151,9 +151,7 @@ class _EventCreationScreenState extends ConsumerState<EventCreationScreen> {
     setState(() => _saving = true);
     try {
       final banner = _banner;
-      final bannerUrl = banner == null
-          ? _existingBannerUrl
-          : await uploadImage(banner, 'events/${user.uid}/${uniqueImageName(banner)}');
+      final bannerUrl = banner == null ? _existingBannerUrl : await uploadImage(banner, UploadFolder.eventBanners);
       final club = user.role == UserRole.coordinator ? user.club : _club;
       final data = EventDoc.newEventData(
         title: _titleController.text.trim(),

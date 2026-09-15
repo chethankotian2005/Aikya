@@ -1,14 +1,18 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl_phone_field/intl_phone_field.dart';
 
 import '../../../core/theme/app_tokens.dart';
 import '../../../services/firebase_service.dart';
 import '../../../services/render_api_service.dart';
 import '../../../utils/friendly_error.dart';
+import '../../../utils/image_upload.dart';
 import '../../../utils/usn_parser.dart';
-import '../../../widgets/avatar_picker.dart';
+import '../../../widgets/profile_picture_field.dart';
 import '../data/user_doc.dart';
 import 'auth_controller.dart';
 
@@ -38,6 +42,9 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
   final _websiteController = TextEditingController();
 
   int? _avatarId;
+  PictureMode _pictureMode = PictureMode.avatar;
+  XFile? _photoFile;
+  Uint8List? _photoPreview;
 
   @override
   void dispose() {
@@ -69,8 +76,19 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
     final user = ref.read(currentUserDocProvider).valueOrNull;
     if (user == null) return;
 
+    if (_pictureMode == PictureMode.photo && _photoFile == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please choose a photo or switch to Avatar.')),
+      );
+      return;
+    }
+
     setState(() => _saving = true);
     try {
+      final photoUrl = _pictureMode == PictureMode.photo
+          ? await uploadImage(_photoFile!, UploadFolder.profilePictures)
+          : null;
+
       await ref.read(renderApiServiceProvider).updateProfile({
         'fullName': _nameController.text.trim(),
         'usn': _usnController.text.trim().toUpperCase(),
@@ -79,7 +97,8 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
         'linkedinUrl': _nullIfEmpty(_linkedinController),
         'instagramHandle': _nullIfEmpty(_instagramController),
         'personalWebsite': _nullIfEmpty(_websiteController),
-        'avatarId': _avatarId,
+        'avatarId': _pictureMode == PictureMode.avatar ? _avatarId : null,
+        'profilePictureUrl': _pictureMode == PictureMode.photo ? photoUrl : null,
         'flagForHodReview': _flagForHodReview,
       });
 
@@ -266,12 +285,24 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
                     children: [
                       const Align(
                         alignment: Alignment.centerLeft,
-                        child: Text('Pick an avatar to represent you.'),
+                        child: Text('Pick an avatar or upload your own photo.'),
                       ),
                       const SizedBox(height: 16),
-                      AvatarPicker(
-                        value: _avatarId,
-                        onChanged: (id) => setState(() => _avatarId = id),
+                      ProfilePictureField(
+                        mode: _pictureMode,
+                        onModeChanged: (m) => setState(() => _pictureMode = m),
+                        avatarId: _avatarId,
+                        onAvatarChanged: (id) => setState(() => _avatarId = id),
+                        photoFile: _photoFile,
+                        photoPreviewBytes: _photoPreview,
+                        onPhotoChanged: (file) async {
+                          final bytes = file == null ? null : await file.readAsBytes();
+                          setState(() {
+                            _photoFile = file;
+                            _photoPreview = bytes;
+                          });
+                        },
+                        existingPhotoUrl: null,
                       ),
                     ],
                   ),
