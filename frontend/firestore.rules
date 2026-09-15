@@ -144,12 +144,20 @@ service cloud.firestore {
       match /registrations/{studentUid} {
         allow read: if signedIn();
 
-        // Only students register, and only together with the +1 counter update.
+        // Only students register, only together with the +1 counter update,
+        // and only if the event isn't restricted to other years (an empty
+        // targetYears list means it's open to everyone).
         allow create: if isOwner(studentUid)
           && isStudent()
           && request.resource.data.keys().hasAll(['formResponses', 'registeredAt'])
           && getAfter(eventPath(eventId)).data.currentRegistrations
-               == get(eventPath(eventId)).data.currentRegistrations + 1;
+               == get(eventPath(eventId)).data.currentRegistrations + 1
+          && (
+               get(eventPath(eventId)).data.get('targetYears', []).size() == 0
+               || get(eventPath(eventId)).data.get('targetYears', []).hasAny(
+                    [get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('yearOfStudy', '')]
+                  )
+             );
 
         allow delete: if (isOwner(studentUid)
               && getAfter(eventPath(eventId)).data.currentRegistrations

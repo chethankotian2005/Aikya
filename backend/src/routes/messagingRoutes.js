@@ -56,6 +56,20 @@ async function notifyHods(settingKey, notification, data) {
   await Promise.all(snap.docs.map((doc) => notifyUser(doc.id, settingKey, notification, data)));
 }
 
+/**
+ * Broadcasts an event-published notification to the right audience: every
+ * student (topic 'all_students') when targetYears is empty, or just the
+ * per-year topics ('year_1'..'year_4') a student subscribes to based on
+ * their own yearOfStudy — so a senior-only workshop doesn't page juniors
+ * who can't even register for it.
+ */
+async function notifyEventAudience(targetYears, notification, data) {
+  const topics = Array.isArray(targetYears) && targetYears.length > 0
+    ? targetYears.map((y) => `year_${y}`)
+    : ['all_students'];
+  await Promise.all(topics.map((topic) => sendNotification({ notification, topic, data })));
+}
+
 router.post(
   '/updates',
   verifyAuth,
@@ -121,12 +135,16 @@ router.post(
     try {
       const {
         title, description, venue, eventDate, endDate, maxCapacity,
-        registrationDeadline, formFields, tag, club, bannerUrl,
+        registrationDeadline, formFields, tag, club, bannerUrl, targetYears,
       } = req.body;
 
       if (typeof title !== 'string' || title.trim().length < 3 || title.length > 120) {
         return res.status(400).json({ error: 'Title must be 3-120 characters.' });
       }
+      const VALID_YEARS = ['1', '2', '3', '4'];
+      const cleanTargetYears = Array.isArray(targetYears)
+        ? [...new Set(targetYears.filter((y) => VALID_YEARS.includes(String(y))))]
+        : [];
       if (typeof description !== 'string' || !description.trim()) {
         return res.status(400).json({ error: 'Description is required.' });
       }
@@ -167,6 +185,9 @@ router.post(
         tag: typeof tag === 'string' && tag ? tag : 'General',
         club: req.role === 'coordinator' ? req.club : (typeof club === 'string' && club ? club : null),
         bannerUrl: typeof bannerUrl === 'string' && bannerUrl ? bannerUrl : null,
+        // Empty = open to every year. Non-empty = only these years can see
+        // or register for it, and only these years get notified it's live.
+        targetYears: cleanTargetYears,
         status,
         createdBy: req.uid,
         createdAt: FieldValue.serverTimestamp(),
@@ -182,14 +203,10 @@ router.post(
       } else {
         // An HOD's own event is auto-approved, so it goes live immediately —
         // students hear about it in the same request.
-        await sendNotification({
-          notification: {
-            title: `New event: ${eventDoc.title}`,
-            body: `${eventDoc.venue} — tap to see details and register.`,
-          },
-          topic: 'all_students',
-          data: { type: 'event_published', eventId: ref.id },
-        });
+        await notifyEventAudience(cleanTargetYears, {
+          title: `New event: ${eventDoc.title}`,
+          body: `${eventDoc.venue} — tap to see details and register.`,
+        }, { type: 'event_published', eventId: ref.id });
       }
 
       res.status(200).json({ success: true, id: ref.id, status });
@@ -239,7 +256,10 @@ function reviewRoute({ collection, ownerField, settingKey, status, notificationF
 
       const { notification, data, broadcast } = notificationFor({ id, item, eventTitle, note });
       await notifyUser(item[ownerField], settingKey, notification, data);
-      if (broadcast) await sendNotification({ notification: broadcast.notification, topic: broadcast.topic, data: broadcast.data ?? data });
+      if (broadcast) {
+        await Promise.all(broadcast.topics.map((topic) =>
+          sendNotification({ notification: broadcast.notification, topic, data: broadcast.data ?? data })));
+      }
 
       res.status(200).json({ success: true, status });
     } catch (error) {
@@ -283,8 +303,13 @@ const eventNotification = (status) => ({ id, item, note }) => ({
   // Approving a pending event is the moment it actually goes live for
   // students, so that's also when they hear about it — same as an HOD's
   // own event, which broadcasts immediately on creation (see POST /events).
+  // Only the event's targetYears (or everyone, if it's open to all years)
+  // get paged — a senior-only workshop shouldn't notify juniors who can't
+  // even register for it.
   broadcast: status === 'approved' ? {
-    topic: 'all_students',
+    topics: Array.isArray(item.targetYears) && item.targetYears.length > 0
+      ? item.targetYears.map((y) => `year_${y}`)
+      : ['all_students'],
     notification: { title: `New event: ${item.title}`, body: `${item.venue} — tap to see details and register.` },
     data: { type: 'event_published', eventId: id },
   } : undefined,
