@@ -20,9 +20,12 @@
 
 import { Router } from 'express';
 import admin from 'firebase-admin';
+import PDFDocument from 'pdfkit';
 import { verifyAuth, requireRole } from '../middleware/verifyAuth.js';
 import { GEMINI_MODEL, generateWithRetry, geminiLimiter, geminiModel } from '../utils/gemini.js';
 import { getEventForStaff } from '../utils/eventAccess.js';
+import { uploadRawToCloudinary } from '../utils/cloudinary.js';
+import { createLetterheadDoc, drawDocumentTitle, renderMarkdownBody, stampLetterheadOnAllPages } from '../utils/pdfTemplate.js';
 
 const router = Router();
 let _db;
@@ -33,6 +36,31 @@ Generate a well-structured, professional report in Markdown format.
 Use clear headings, bullet points, and tables where appropriate.
 Be factual and concise. If event data is provided, incorporate it accurately.
 The report should be suitable for accreditation documentation.`;
+
+/** Renders a generated report onto the department's official letterhead. */
+function renderReportPdf(eventTitle, markdown) {
+  return new Promise((resolve, reject) => {
+    const doc = createLetterheadDoc(PDFDocument, { title: `Event Report — ${eventTitle}` });
+    const chunks = [];
+    doc.on('data', (chunk) => chunks.push(chunk));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+
+    drawDocumentTitle(doc, 'EVENT REPORT', eventTitle);
+    doc
+      .fontSize(9)
+      .font('Helvetica')
+      .fillColor('#4A5A7A')
+      .text(`Generated: ${new Date().toLocaleDateString('en-IN', { dateStyle: 'long' })}`, { align: 'center' });
+    doc.moveDown(1.5);
+    doc.fillColor('#0E1B3D');
+
+    renderMarkdownBody(doc, markdown);
+
+    stampLetterheadOnAllPages(doc);
+    doc.end();
+  });
+}
 
 router.post(
   '/generate-report',
@@ -54,9 +82,11 @@ router.post(
       }
 
       let eventContext = '';
+      let eventTitle = 'Department Activity Report';
       if (eventId) {
         const { event, status, error } = await getEventForStaff(db(), eventId, req);
         if (error) return res.status(status).json({ error });
+        eventTitle = event.title;
 
         eventContext = `
 Event Details:
@@ -89,11 +119,17 @@ Generate a comprehensive, formatted Markdown report.`;
       const result = await generateWithRetry(geminiModel(SYSTEM_PROMPT), userPrompt);
       const markdown = result.response.text();
 
+      const pdfBuffer = await renderReportPdf(eventTitle, markdown);
+      const publicId = `${eventTitle.replace(/[^A-Za-z0-9_-]+/g, '_')}_${Date.now()}`;
+      const uploaded = await uploadRawToCloudinary(pdfBuffer, { folder: 'aikya/event-reports', publicId });
+      const pdfUrl = uploaded.secure_url;
+
       if (eventId) {
         await db().collection('events').doc(eventId).set(
           {
             report: {
               markdown,
+              pdfUrl,
               model: GEMINI_MODEL,
               generatedBy: req.uid,
               generatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -105,6 +141,7 @@ Generate a comprehensive, formatted Markdown report.`;
 
       return res.json({
         markdown,
+        pdfUrl,
         model: GEMINI_MODEL,
         eventId: eventId || null,
         generatedBy: req.uid,

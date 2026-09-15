@@ -28,7 +28,7 @@ export function geminiModel(systemInstruction) {
  * One retry with a short backoff clears almost all of them without making
  * the user click "try again" themselves.
  */
-export async function generateWithRetry(model, prompt, { retries = 2, delayMs = 1500 } = {}) {
+export async function generateWithRetry(model, prompt, { retries = 1, delayMs = 1500 } = {}) {
   let lastErr;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {

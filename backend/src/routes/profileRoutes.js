@@ -53,8 +53,15 @@ router.put('/profile', verifyAuth, async (req, res) => {
       }
     }
 
+    const db = admin.firestore();
+    const userRef = db.collection('users').doc(req.uid);
+    const existing = (await userRef.get()).data() || {};
+
+    // fullName is only settable during first-run setup — the UI shows it as
+    // locked everywhere else, and this enforces that server-side too (a
+    // valid session could otherwise rename the account via a direct API call).
     const updateData = {
-      fullName: fullName.trim().slice(0, 100),
+      fullName: existing.profileComplete === true ? existing.fullName : fullName.trim().slice(0, 100),
       profileComplete: true,
     };
 
@@ -85,8 +92,6 @@ router.put('/profile', verifyAuth, async (req, res) => {
     if (flagForHodReview === true) {
       updateData.flagForHodReview = true;
     }
-
-    const db = admin.firestore();
 
     if (req.role === 'student') {
       const accountUsn = req.email?.split('@')[0]?.toUpperCase();

@@ -21,6 +21,7 @@ import PDFDocument from 'pdfkit';
 import { verifyAuth, requireRole } from '../middleware/verifyAuth.js';
 import { generateWithRetry, geminiLimiter, geminiModel } from '../utils/gemini.js';
 import { uploadRawToCloudinary } from '../utils/cloudinary.js';
+import { createLetterheadDoc, drawDocumentTitle, renderMarkdownBody, stampLetterheadOnAllPages } from '../utils/pdfTemplate.js';
 
 const router = Router();
 let _db;
@@ -78,72 +79,31 @@ async function gatherEventData(eventIds) {
 }
 
 /**
- * Render markdown-like text to a PDF buffer using PDFKit.
- * Parses basic heading (#, ##, ###), bullet points, and body text.
+ * Render markdown-like text to a letterheaded PDF buffer using PDFKit —
+ * same official department header/footer on every page as the rest of the
+ * department's documents (see utils/pdfTemplate.js).
  */
-function renderPdf(title, markdownText) {
+function renderPdf(title, semesterLabel, markdownText) {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({
-      size: 'A4',
-      margins: { top: 60, bottom: 60, left: 60, right: 60 },
-      info: {
-        Title: title,
-        Author: 'AIKYA — AI & ML Department',
-        Creator: 'AIKYA Accreditation Compiler',
-      },
-    });
+    const doc = createLetterheadDoc(PDFDocument, { title });
 
     const chunks = [];
     doc.on('data', (chunk) => chunks.push(chunk));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    doc.fontSize(28).font('Helvetica-Bold').text(title, { align: 'center' });
-    doc.moveDown(0.5);
+    drawDocumentTitle(doc, 'ACCREDITATION REPORT', semesterLabel);
     doc
-      .fontSize(14)
+      .fontSize(9)
       .font('Helvetica')
-      .fillColor('#1F5C99')
-      .text('AI & ML Department — SMVITM', { align: 'center' });
-    doc
-      .fontSize(11)
       .fillColor('#4A5A7A')
-      .text(`Generated: ${new Date().toLocaleDateString('en-IN', { dateStyle: 'long' })}`, {
-        align: 'center',
-      });
-    doc.moveDown(2);
+      .text(`Generated: ${new Date().toLocaleDateString('en-IN', { dateStyle: 'long' })}`, { align: 'center' });
+    doc.moveDown(1.5);
     doc.fillColor('#0E1B3D');
 
-    for (const line of markdownText.split('\n')) {
-      const trimmed = line.trim();
+    renderMarkdownBody(doc, markdownText);
 
-      if (trimmed.startsWith('### ')) {
-        doc.moveDown(0.5);
-        doc.fontSize(13).font('Helvetica-Bold').text(trimmed.slice(4));
-        doc.moveDown(0.2);
-      } else if (trimmed.startsWith('## ')) {
-        doc.moveDown(0.8);
-        doc.fontSize(16).font('Helvetica-Bold').text(trimmed.slice(3));
-        doc.moveDown(0.3);
-      } else if (trimmed.startsWith('# ')) {
-        doc.addPage();
-        doc.fontSize(20).font('Helvetica-Bold').text(trimmed.slice(2));
-        doc.moveDown(0.5);
-      } else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
-        doc
-          .fontSize(11)
-          .font('Helvetica')
-          .text(`  •  ${trimmed.slice(2)}`, { indent: 16 });
-      } else if (trimmed === '') {
-        doc.moveDown(0.4);
-      } else {
-        doc.fontSize(11).font('Helvetica').text(trimmed, {
-          align: 'justify',
-          lineGap: 3,
-        });
-      }
-    }
-
+    stampLetterheadOnAllPages(doc);
     doc.end();
   });
 }
@@ -188,7 +148,7 @@ Generate a complete, structured Markdown accreditation document.`;
       const result = await generateWithRetry(geminiModel(SYSTEM_PROMPT), prompt);
       const markdown = result.response.text();
 
-      const pdfBuffer = await renderPdf(`Accreditation Report — ${label}`, markdown);
+      const pdfBuffer = await renderPdf(`Accreditation Report — ${label}`, label, markdown);
 
       const publicId = `${label.replace(/[^A-Za-z0-9_-]+/g, '_')}_${Date.now()}`;
       const uploaded = await uploadRawToCloudinary(pdfBuffer, { folder: 'aikya/accreditation-reports', publicId });
