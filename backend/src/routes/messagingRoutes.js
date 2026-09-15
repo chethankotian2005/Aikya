@@ -179,6 +179,17 @@ router.post(
           title: 'Event awaiting approval',
           body: `${req.userName || 'A coordinator'} submitted "${eventDoc.title}" for review.`,
         }, { type: 'event_review', eventId: ref.id });
+      } else {
+        // An HOD's own event is auto-approved, so it goes live immediately —
+        // students hear about it in the same request.
+        await sendNotification({
+          notification: {
+            title: `New event: ${eventDoc.title}`,
+            body: `${eventDoc.venue} — tap to see details and register.`,
+          },
+          topic: 'all_students',
+          data: { type: 'event_published', eventId: ref.id },
+        });
       }
 
       res.status(200).json({ success: true, id: ref.id, status });
@@ -226,8 +237,9 @@ function reviewRoute({ collection, ownerField, settingKey, status, notificationF
         if (eventSnap.exists) eventTitle = eventSnap.data().title;
       }
 
-      const { notification, data } = notificationFor({ id, item, eventTitle, note });
+      const { notification, data, broadcast } = notificationFor({ id, item, eventTitle, note });
       await notifyUser(item[ownerField], settingKey, notification, data);
+      if (broadcast) await sendNotification({ notification: broadcast.notification, topic: broadcast.topic, data: broadcast.data ?? data });
 
       res.status(200).json({ success: true, status });
     } catch (error) {
@@ -268,6 +280,14 @@ const eventNotification = (status) => ({ id, item, note }) => ({
         : `Your event "${item.title}" was rejected.${note ? ` Note: ${note}` : ''}`,
   },
   data: { type: 'event_review', eventId: id },
+  // Approving a pending event is the moment it actually goes live for
+  // students, so that's also when they hear about it — same as an HOD's
+  // own event, which broadcasts immediately on creation (see POST /events).
+  broadcast: status === 'approved' ? {
+    topic: 'all_students',
+    notification: { title: `New event: ${item.title}`, body: `${item.venue} — tap to see details and register.` },
+    data: { type: 'event_published', eventId: id },
+  } : undefined,
 });
 
 for (const status of ['approved', 'rejected']) {
