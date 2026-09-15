@@ -1,8 +1,13 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import rateLimit from 'express-rate-limit';
 
-// gemini-1.5-* models were retired by Google; override via env when a newer one ships.
-export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+// Google retires Gemini model versions on a rolling basis (gemini-1.5-* were
+// retired first, then gemini-2.5-flash on ~2026-09) — if AI features start
+// failing with a 404 "model no longer available" error, check
+// https://ai.google.dev/gemini-api/docs/models for the current name and
+// update the default here, or override via the GEMINI_MODEL env var without
+// a redeploy.
+export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
 
 export const geminiLimiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10),
