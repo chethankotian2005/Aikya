@@ -5,9 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:native_exif/native_exif.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/theme/app_tokens.dart';
 import '../../models/firestore/event_doc.dart';
@@ -48,6 +46,7 @@ class _AdminReportGeneratorViewState extends ConsumerState<AdminReportGeneratorV
   bool _generating = false;
   bool _publishing = false;
   String? _markdown;
+  String? _pdfUrl;
 
   @override
   void dispose() {
@@ -103,13 +102,13 @@ class _AdminReportGeneratorViewState extends ConsumerState<AdminReportGeneratorV
         context.writeln('Photo ${i + 1}: location ${p.gps ?? 'unknown'}, taken ${p.takenAt ?? 'unknown'}');
       }
 
-      final markdown = await ref.read(renderApiServiceProvider).generateReport(
+      final (markdown, pdfUrl) = await ref.read(renderApiServiceProvider).generateReport(
             brief: _briefController.text.trim(),
             eventId: _eventId,
             includeAttendance: true,
             additionalContext: context.toString(),
           );
-      if (mounted) setState(() => _markdown = markdown);
+      if (mounted) setState(() { _markdown = markdown; _pdfUrl = pdfUrl; });
     } catch (e) {
       if (mounted) _snack(friendlyError(e), error: true);
     } finally {
@@ -117,15 +116,13 @@ class _AdminReportGeneratorViewState extends ConsumerState<AdminReportGeneratorV
     }
   }
 
+  /// Opens the report PDF — rendered server-side onto the department's
+  /// official letterhead (see backend/src/utils/pdfTemplate.js) — rather
+  /// than building a separate, unbranded PDF on-device.
   Future<void> _exportPdf() async {
-    final markdown = _markdown;
-    if (markdown == null) return;
-    final pdf = pw.Document()
-      ..addPage(pw.MultiPage(build: (_) => [pw.Paragraph(text: markdown.replaceAll(RegExp(r'[#*_`]'), ''))]));
-    await Printing.layoutPdf(
-      onLayout: (PdfPageFormat format) async => pdf.save(),
-      name: 'AIKYA_Event_Report.pdf',
-    );
+    final url = _pdfUrl;
+    if (url == null) return;
+    await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
   }
 
   Future<void> _publishToMemoryWall(List<EventDoc> events) async {
@@ -266,14 +263,14 @@ class _AdminReportGeneratorViewState extends ConsumerState<AdminReportGeneratorV
           runSpacing: 8,
           children: [
             TextButton.icon(
-              onPressed: () => setState(() => _markdown = null),
+              onPressed: () => setState(() { _markdown = null; _pdfUrl = null; }),
               icon: const Icon(Icons.arrow_back_rounded),
               label: const Text('Back to editor'),
             ),
             OutlinedButton.icon(
-              onPressed: _exportPdf,
+              onPressed: _pdfUrl == null ? null : _exportPdf,
               icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
-              label: const Text('Export PDF'),
+              label: const Text('Download PDF'),
             ),
             if (_photos.isNotEmpty)
               ElevatedButton.icon(

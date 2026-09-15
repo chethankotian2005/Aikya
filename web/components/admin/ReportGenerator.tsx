@@ -20,6 +20,7 @@ export default function ReportGenerator({ initialEventId }: { initialEventId: st
   const [brief, setBrief] = useState("");
   const [photos, setPhotos] = useState<File[]>([]);
   const [markdown, setMarkdown] = useState<string | null>(null);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -37,13 +38,14 @@ export default function ReportGenerator({ initialEventId }: { initialEventId: st
         `Event photos: ${photos.length}`,
         ...photos.map((p, i) => `Photo ${i + 1}: ${p.name}, last modified ${new Date(p.lastModified).toISOString()}`),
       ].join("\n");
-      const res = await callBackend<{ markdown: string }>("generate-report", {
+      const res = await callBackend<{ markdown: string; pdfUrl: string }>("generate-report", {
         brief: brief.trim(),
         eventId,
         includeAttendance: true,
         additionalContext: context,
       });
       setMarkdown(res.markdown);
+      setPdfUrl(res.pdfUrl);
     } catch (err) {
       setError(friendlyError(err));
     } finally {
@@ -92,7 +94,11 @@ export default function ReportGenerator({ initialEventId }: { initialEventId: st
       <div className="flex flex-col gap-4 p-5">
         <div className="flex flex-wrap gap-2 print:hidden">
           <button type="button" className="btn-outline" onClick={() => setMarkdown(null)}><ArrowLeft size={16} aria-hidden /> Back to editor</button>
-          <button type="button" className="btn-outline" onClick={() => window.print()}><Printer size={16} aria-hidden /> Print / PDF</button>
+          {pdfUrl && (
+            <a href={pdfUrl} target="_blank" rel="noopener noreferrer" className="btn-primary">
+              <Printer size={16} aria-hidden /> Download PDF
+            </a>
+          )}
           <button type="button" className="btn-outline" onClick={download}><Download size={16} aria-hidden /> Download .md</button>
           {photos.length > 0 && (
             <button type="button" className="btn-primary" onClick={publish} disabled={busy}>

@@ -79,8 +79,9 @@ class RenderApiService {
   Future<Map<String, dynamic>> createEvent(Map<String, dynamic> event) =>
       _send('POST', '/messaging/events', event);
 
-  /// POST /api/generate-report
-  Future<String> generateReport({
+  /// POST /api/generate-report — returns the markdown plus a `pdfUrl` for
+  /// the same report rendered onto the department's official letterhead.
+  Future<(String markdown, String? pdfUrl)> generateReport({
     required String brief,
     String? eventId,
     bool includeAttendance = true,
@@ -92,7 +93,7 @@ class RenderApiService {
       'includeAttendance': includeAttendance,
       'additionalContext': ?additionalContext,
     });
-    return data['markdown'] as String? ?? '';
+    return (data['markdown'] as String? ?? '', data['pdfUrl'] as String?);
   }
 
   /// POST /api/compile-accreditation — returns { reportId, pdfUrl, ... }.
